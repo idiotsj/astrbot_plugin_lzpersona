@@ -14,6 +14,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.star_tools import StarTools
 
 # 导入解耦的模块
@@ -148,9 +149,9 @@ class QuickPersona(Star):
         yield event.plain_result(help_text)
 
     @qp.command("生成人格", alias={"gen"})
-    async def cmd_gen(self, event: AstrMessageEvent, *args):
+    async def cmd_gen(self, event: AstrMessageEvent, description: GreedyStr = ""):
         """根据描述生成人格"""
-        description = " ".join(args).strip()
+        description = str(description).strip()
 
         if not description:
             yield event.plain_result(
@@ -427,9 +428,9 @@ class QuickPersona(Star):
             yield event.plain_result("❌ 回滚失败")
 
     @qp.command("优化人格", alias={"refine"})
-    async def cmd_refine(self, event: AstrMessageEvent, *args):
+    async def cmd_refine(self, event: AstrMessageEvent, feedback: GreedyStr = ""):
         """根据反馈优化当前人格"""
-        feedback = " ".join(args).strip()
+        feedback = str(feedback).strip()
 
         if not feedback:
             yield event.plain_result(
