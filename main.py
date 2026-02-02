@@ -14,7 +14,6 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.star.star_tools import StarTools
 
 # 导入解耦的模块
@@ -42,10 +41,9 @@ class QuickPersona(Star):
     通过简单的命令快速生成、优化和管理 AI 人格，无需手动编写复杂的提示词。
     """
 
-    def __init__(self, context: Context, config: AstrBotConfig | None = None):
+    def __init__(self, context: Context):
         super().__init__(context)
         self.context = context
-        self.config = config
 
         # 初始化数据目录 - 使用独立的 plugin_data 目录
         base_data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME)).parent.parent
@@ -57,7 +55,7 @@ class QuickPersona(Star):
         self.state.load()
 
         # 初始化服务
-        self.llm_service = LLMService(context, config)
+        self.llm_service = LLMService(context)
         self.persona_service = PersonaService(
             context, self.state, self._get_backup_versions()
         )
@@ -68,9 +66,14 @@ class QuickPersona(Star):
 
     def _get_cfg(self, key: str, default: Any = None) -> Any:
         """获取配置项"""
-        if self.config is None:
+        # 从 context 获取配置
+        try:
+            config = self.context.get_config()
+            if config is None:
+                return default
+            return config.get(key, default)
+        except Exception:
             return default
-        return self.config.get(key, default)
 
     def _get_max_prompt_length(self) -> int:
         return int(self._get_cfg("max_prompt_length", 800) or 800)
@@ -112,7 +115,6 @@ class QuickPersona(Star):
     @filter.command_group("快捷人格", alias={"qp", "quickpersona"})
     def qp(self):
         """快捷人格生成器命令组"""
-        pass
 
     @qp.command("使用帮助", alias={"help", "?"})
     async def cmd_help(self, event: AstrMessageEvent):

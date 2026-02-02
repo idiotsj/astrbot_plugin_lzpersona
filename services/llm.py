@@ -15,15 +15,18 @@ if TYPE_CHECKING:
 class LLMService:
     """LLM 调用封装"""
 
-    def __init__(self, context: "Context", config: Any = None):
+    def __init__(self, context: "Context"):
         self.context = context
-        self.config = config
 
     def _get_cfg(self, key: str, default: Any = None) -> Any:
         """获取配置项"""
-        if self.config is None:
+        try:
+            config = self.context.get_config()
+            if config is None:
+                return default
+            return config.get(key, default)
+        except Exception:
             return default
-        return self.config.get(key, default)
 
     def _get_architect_provider_id(self) -> str:
         """获取架构师模型 Provider ID"""
