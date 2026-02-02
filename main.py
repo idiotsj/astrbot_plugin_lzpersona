@@ -115,6 +115,7 @@ class QuickPersona(Star):
     @filter.command_group("快捷人格", alias={"qp", "quickpersona"})
     def qp(self):
         """快捷人格生成器命令组"""
+        pass
 
     @qp.command("使用帮助", alias={"help", "?"})
     async def cmd_help(self, event: AstrMessageEvent):
