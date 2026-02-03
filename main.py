@@ -123,30 +123,130 @@ class QuickPersona(Star):
         """显示帮助信息"""
         help_text = """快捷人格生成器 - 命令列表
 
+🤖 智能入口（推荐）
+/人格 <自然语言> - 智能识别意图，自动执行
+
 📝 生成与优化
 /快捷人格 生成人格 <描述> - 根据描述生成人格
-/快捷人格 优化人格 <反馈> - 根据反馈优化当前人格
+/快捷人格 优化人格 <反馈> - 优化人格（可直接优化未应用的人格）
 /快捷人格 压缩人格 [强度] - 压缩提示词(轻度/中度/极限)
-
-🎭 人格画像 (开发中)
-/快捷人格 画像生成 - 从转发的聊天记录生成画像
-/快捷人格 自省检测 - 自省当前人格
 
 📋 管理
 /快捷人格 查看状态 - 查看当前状态
 /快捷人格 确认应用 - 应用待确认的人格
 /快捷人格 取消操作 - 取消待确认的人格
-/快捷人格 历史版本 [人格ID] - 查看历史版本列表
-/快捷人格 版本回滚 - 回滚到上一个版本
 /快捷人格 人格列表 - 列出所有人格
-/快捷人格 查看详情 <人格ID> - 查看人格详情
-/快捷人格 选择人格 <人格ID> - 选择人格（后续操作的目标）
+/快捷人格 选择人格 <人格ID> - 选择人格
 /快捷人格 激活人格 [人格ID] - 激活人格到当前对话
-/快捷人格 新建对话 [人格ID] - 新建对话并激活人格
 /快捷人格 删除人格 <人格ID> - 删除人格
 
-💡 提示：生成人格后需要 /快捷人格 确认应用，然后 /快捷人格 激活人格 让 AI 使用"""
+💡 使用流程示例：
+  /人格 生成一个傲娇猫娘  → 生成人格
+  /人格 让她更傲娇一点    → 直接优化未应用的人格
+  /人格 确认              → 满意后应用
+  /人格 激活              → 让AI使用此人格"""
         yield event.plain_result(help_text)
+
+    # ==================== 智能入口 ====================
+
+    @filter.command("人格", alias={"persona"})
+    async def cmd_smart(self, event: AstrMessageEvent, query: GreedyStr = ""):
+        """智能意图识别入口"""
+        query = str(query).strip()
+
+        if not query:
+            async for r in self.cmd_help(event):
+                yield r
+            return
+
+        session_id = get_session_id(event)
+        session = self.state.get_session(session_id)
+
+        # 构建上下文信息
+        try:
+            personas = await self.persona_service.get_all_personas()
+            persona_list = ", ".join([p.persona_id for p in personas[:10]])
+            if len(personas) > 10:
+                persona_list += f" (共 {len(personas)} 个)"
+        except Exception:
+            persona_list = "无法获取"
+
+        context_info = {
+            "current_persona_id": session.current_persona_id or "无",
+            "persona_list": persona_list or "无",
+            "session_state": session.state.value,
+            "has_pending": "是" if session.pending_persona else "否",
+        }
+
+        # 调用 LLM 识别意图
+        intent = await self.llm_service.recognize_intent(query, context_info, event)
+        action = intent.get("action", "help")
+
+        logger.info(f"[lzpersona] 智能识别: query={query}, intent={intent}")
+
+        # 路由到相应的处理方法
+        if action == "generate":
+            desc = intent.get("description", "") or query
+            async for r in self.cmd_gen(event, desc):
+                yield r
+
+        elif action == "refine":
+            fb = intent.get("feedback", "") or query
+            async for r in self.cmd_refine(event, fb):
+                yield r
+
+        elif action == "shrink":
+            intensity = intent.get("intensity", "轻度") or "轻度"
+            async for r in self.cmd_shrink(event, intensity):
+                yield r
+
+        elif action == "list":
+            async for r in self.cmd_list(event):
+                yield r
+
+        elif action == "view":
+            pid = intent.get("persona_id", "")
+            async for r in self.cmd_view(event, pid):
+                yield r
+
+        elif action == "activate":
+            pid = intent.get("persona_id", "")
+            if pid:
+                async for r in self.cmd_activate(event, pid):
+                    yield r
+            else:
+                yield event.plain_result(
+                    "请指定要激活的人格，例如：/人格 切换到猫娘\n"
+                    f"可用人格: {persona_list}"
+                )
+
+        elif action == "delete":
+            pid = intent.get("persona_id", "")
+            if pid:
+                async for r in self.cmd_delete(event, pid):
+                    yield r
+            else:
+                yield event.plain_result("请指定要删除的人格ID")
+
+        elif action == "rollback":
+            async for r in self.cmd_rollback(event):
+                yield r
+
+        elif action == "status":
+            async for r in self.cmd_status(event):
+                yield r
+
+        elif action == "apply":
+            async for r in self.cmd_apply(event):
+                yield r
+
+        elif action == "cancel":
+            async for r in self.cmd_cancel(event):
+                yield r
+
+        else:
+            async for r in self.cmd_help(event):
+                yield r
 
     @qp.command("生成人格", alias={"gen"})
     async def cmd_gen(self, event: AstrMessageEvent, description: GreedyStr = ""):
@@ -216,8 +316,10 @@ class QuickPersona(Star):
                 f"发送 /快捷人格 取消操作 取消"
             )
         else:
+            # 获取用户名用于占位符替换
+            user_name = event.get_sender_name() or "User"
             success = await self.persona_service.create_or_update(
-                persona_id, result, backup=False
+                persona_id, result, backup=False, user_name=user_name
             )
             if success:
                 session.current_persona_id = persona_id
@@ -240,8 +342,10 @@ class QuickPersona(Star):
             return
 
         pending = session.pending_persona
+        # 获取用户名用于占位符替换
+        user_name = event.get_sender_name() or "User"
         success = await self.persona_service.create_or_update(
-            pending.persona_id, pending.system_prompt, backup=True
+            pending.persona_id, pending.system_prompt, backup=True, user_name=user_name
         )
 
         if success:
@@ -429,7 +533,7 @@ class QuickPersona(Star):
 
     @qp.command("优化人格", alias={"refine"})
     async def cmd_refine(self, event: AstrMessageEvent, feedback: GreedyStr = ""):
-        """根据反馈优化当前人格"""
+        """根据反馈优化当前人格（支持对待确认人格直接优化）"""
         feedback = str(feedback).strip()
 
         if not feedback:
@@ -440,29 +544,47 @@ class QuickPersona(Star):
 
         session_id = get_session_id(event)
         session = self.state.get_session(session_id)
-        persona_id = session.current_persona_id
 
-        if not persona_id:
+        # 检查是否有待确认的人格，如果有则直接对其进行优化
+        if session.state == SessionState.WAITING_CONFIRM and session.pending_persona:
+            pending = session.pending_persona
+            current_prompt = pending.system_prompt
+            persona_id = pending.persona_id
+            is_pending = True
+
             yield event.plain_result(
-                "请先使用 /快捷人格 选择人格 <人格ID> 选择一个人格"
+                f"🔄 正在优化待确认的人格...\n"
+                f"📌 人格ID: {persona_id}\n"
+                f"反馈: {shorten_prompt(feedback, 50)}"
             )
-            return
+        else:
+            # 否则对已选择的人格进行优化
+            persona_id = session.current_persona_id
+            is_pending = False
 
-        try:
-            persona = await self.persona_service.get_persona(persona_id)
-        except ValueError:
-            yield event.plain_result(f"❌ 未找到人格: {persona_id}")
-            return
+            if not persona_id:
+                yield event.plain_result(
+                    "请先使用 /快捷人格 选择人格 <人格ID> 选择一个人格\n"
+                    "或者先生成一个人格后直接反馈优化"
+                )
+                return
 
-        yield event.plain_result(
-            f"🔄 正在根据反馈优化人格...\n反馈: {shorten_prompt(feedback, 50)}"
-        )
+            try:
+                persona = await self.persona_service.get_persona(persona_id)
+                current_prompt = persona.system_prompt
+            except ValueError:
+                yield event.plain_result(f"❌ 未找到人格: {persona_id}")
+                return
+
+            yield event.plain_result(
+                f"🔄 正在根据反馈优化人格...\n反馈: {shorten_prompt(feedback, 50)}"
+            )
 
         template = self._get_template(
             "persona_refine_template", DEFAULT_REFINE_TEMPLATE
         )
         prompt = template.format(
-            current_prompt=persona.system_prompt, feedback=feedback
+            current_prompt=current_prompt, feedback=feedback
         )
         result = await self.llm_service.call_architect(prompt, event)
 
@@ -471,25 +593,30 @@ class QuickPersona(Star):
             return
 
         if self._get_confirm_before_apply():
+            # 更新待确认人格（无论之前是否有待确认状态）
             session.state = SessionState.WAITING_CONFIRM
             session.pending_persona = PendingPersona(
                 persona_id=persona_id,
                 system_prompt=result,
                 created_at=time.time(),
                 mode="refine",
-                original_prompt=persona.system_prompt,
+                original_prompt=current_prompt,
             )
 
+            status_hint = "（已更新待确认人格）" if is_pending else ""
             yield event.plain_result(
-                f"✅ 人格优化完成！\n\n"
+                f"✅ 人格优化完成！{status_hint}\n\n"
                 f"📌 人格ID: {persona_id}\n"
                 f"📝 优化后提示词 ({len(result)}字符):\n{shorten_prompt(result, 300)}\n\n"
-                f"发送 /快捷人格 确认应用 应用此更改\n"
+                f"💡 可以继续发送反馈进行优化，或者：\n"
+                f"发送 /快捷人格 确认应用 应用此人格\n"
                 f"发送 /快捷人格 取消操作 取消"
             )
         else:
+            # 获取用户名用于占位符替换
+            user_name = event.get_sender_name() or "User"
             success = await self.persona_service.create_or_update(
-                persona_id, result, backup=True
+                persona_id, result, backup=True, user_name=user_name
             )
             if success:
                 yield event.plain_result(
@@ -562,8 +689,10 @@ class QuickPersona(Star):
                 f"发送 /快捷人格 取消操作 取消"
             )
         else:
+            # 获取用户名用于占位符替换
+            user_name = event.get_sender_name() or "User"
             success = await self.persona_service.create_or_update(
-                persona_id, result, backup=True
+                persona_id, result, backup=True, user_name=user_name
             )
             if success:
                 yield event.plain_result(

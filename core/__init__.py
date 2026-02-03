@@ -7,9 +7,9 @@ from .constants import (
     DEFAULT_GEN_TEMPLATE,
     DEFAULT_REFINE_TEMPLATE,
     DEFAULT_SHRINK_TEMPLATE,
-    # 以下模板预留给后续功能
     DEFAULT_CLONE_TEMPLATE,
     DEFAULT_INTROSPECT_TEMPLATE,
+    DEFAULT_INTENT_TEMPLATE,
 )
 from .models import SessionState, PendingPersona, PersonaBackup, SessionData
 from .state import QuickPersonaState
@@ -25,6 +25,7 @@ __all__ = [
     "DEFAULT_SHRINK_TEMPLATE",
     "DEFAULT_CLONE_TEMPLATE",
     "DEFAULT_INTROSPECT_TEMPLATE",
+    "DEFAULT_INTENT_TEMPLATE",
     # 数据模型
     "SessionState",
     "PendingPersona",

@@ -57,3 +57,65 @@ def get_session_id(event: "AstrMessageEvent") -> str:
         or event.get_sender_id()
         or "default"
     )
+
+
+def replace_placeholders(
+    prompt: str,
+    char_name: str = "",
+    user_name: str = "User",
+) -> str:
+    """替换角色卡中的占位符
+
+    将 SillyTavern 风格的占位符替换为实际值：
+    - {{user}} -> 用户名
+    - {{char}} -> 角色名
+    - {{User}} -> 用户名
+    - {{Char}} -> 角色名
+
+    Args:
+        prompt: 包含占位符的提示词
+        char_name: 角色名（如不提供则保留 {{char}}）
+        user_name: 用户名
+
+    Returns:
+        替换后的提示词
+    """
+    result = prompt
+
+    # 替换用户占位符
+    result = re.sub(r"\{\{user\}\}", user_name, result, flags=re.IGNORECASE)
+
+    # 替换角色占位符（如果提供了角色名）
+    if char_name:
+        result = re.sub(r"\{\{char\}\}", char_name, result, flags=re.IGNORECASE)
+
+    return result
+
+
+def extract_char_name(prompt: str) -> str:
+    """从角色卡中提取角色名
+
+    尝试从 Character Card 格式中提取角色名
+
+    Args:
+        prompt: 角色卡提示词
+
+    Returns:
+        提取的角色名，如果未找到则返回空字符串
+    """
+    # 尝试从 "Character Card: XXX" 格式提取
+    match = re.search(r"Character Card:\s*(.+?)(?:\n|$)", prompt)
+    if match:
+        return match.group(1).strip()
+
+    # 尝试从 "**Name**: XXX" 格式提取
+    match = re.search(r"\*\*Name\*\*:\s*(.+?)(?:\n|$)", prompt)
+    if match:
+        return match.group(1).strip()
+
+    # 尝试从 "# Role: XXX" 格式提取
+    match = re.search(r"#\s*Role:\s*(.+?)(?:\n|$)", prompt)
+    if match:
+        return match.group(1).strip()
+
+    return ""

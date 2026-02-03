@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from astrbot.api import logger
 
 from ..core.constants import PERSONA_PREFIX
+from ..utils.helpers import replace_placeholders, extract_char_name
 
 if TYPE_CHECKING:
     from astrbot.api.star import Context
@@ -29,7 +30,11 @@ class PersonaService:
         self.conversation_manager = context.conversation_manager
 
     async def create_or_update(
-        self, persona_id: str, system_prompt: str, backup: bool = True
+        self,
+        persona_id: str,
+        system_prompt: str,
+        backup: bool = True,
+        user_name: str = "User",
     ) -> bool:
         """创建或更新人格
 
@@ -37,11 +42,17 @@ class PersonaService:
             persona_id: 人格ID
             system_prompt: 系统提示词
             backup: 是否备份旧版本
+            user_name: 用户名（用于替换占位符）
 
         Returns:
             是否成功
         """
         try:
+            # 替换占位符
+            char_name = extract_char_name(system_prompt)
+            processed_prompt = replace_placeholders(
+                system_prompt, char_name=char_name, user_name=user_name
+            )
             # 检查是否已存在
             existing = None
             try:
@@ -59,13 +70,13 @@ class PersonaService:
 
                 # 更新
                 await self.persona_manager.update_persona(
-                    persona_id=persona_id, system_prompt=system_prompt
+                    persona_id=persona_id, system_prompt=processed_prompt
                 )
                 logger.info(f"[lzpersona] 已更新人格: {persona_id}")
             else:
                 # 创建新人格
                 await self.persona_manager.create_persona(
-                    persona_id=persona_id, system_prompt=system_prompt
+                    persona_id=persona_id, system_prompt=processed_prompt
                 )
                 logger.info(f"[lzpersona] 已创建人格: {persona_id}")
 
