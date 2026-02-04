@@ -15,7 +15,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.util import session_waiter
-from astrbot.api.message.components import Plain
+from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.star_tools import StarTools
