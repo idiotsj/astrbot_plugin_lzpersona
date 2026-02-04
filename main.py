@@ -37,13 +37,22 @@ from .utils import shorten_prompt, generate_persona_id, get_session_id
 
 # 人格卡片 HTML 模板
 PERSONA_CARD_TEMPLATE = """
-<div style="
-    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 20px;
-    border-radius: 16px;
-    max-width: 600px;
-">
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { 
+            width: 600px;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+<div style="width: 100%;">
     <div style="
         background: rgba(255,255,255,0.95);
         border-radius: 12px;
@@ -104,6 +113,8 @@ PERSONA_CARD_TEMPLATE = """
         {% endif %}
     </div>
 </div>
+</body>
+</html>
 """
 
 
