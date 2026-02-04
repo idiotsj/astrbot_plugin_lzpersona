@@ -211,6 +211,10 @@ class QuickPersona(Star):
                     "content": content,
                     "meta_info": meta_info or {},
                     "footer": footer,
+                },
+                options={
+                    "full_page": False,  # 不截取整页，只截取视口区域
+                    "clip": {"x": 0, "y": 0, "width": 600, "height": 2000},  # 裁剪区域
                 }
             )
             yield event.image_result(image_url)
