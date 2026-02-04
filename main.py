@@ -35,9 +35,6 @@ from .core import (
 from .services import LLMService, PersonaService
 from .utils import shorten_prompt, generate_persona_id, get_session_id
 
-# 思考标签过滤正则表达式
-FOX_THOUGHT_PATTERN = re.compile(r"<fox_thought>.*?</fox_thought>", re.DOTALL | re.IGNORECASE)
-
 # 人格卡片 HTML 模板
 PERSONA_CARD_TEMPLATE = """
 <div style="
@@ -139,23 +136,6 @@ class QuickPersona(Star):
         )
 
         logger.info(f"[lzpersona] 插件初始化完成，数据目录: {self.data_dir}")
-
-    # ==================== 思考标签过滤 ====================
-
-    @filter.on_decorating_result()
-    async def filter_fox_thought(self, event: AstrMessageEvent):
-        """过滤 <fox_thought> 思考标签"""
-        result = event.get_result()
-        if result is None or not result.chain:
-            return
-
-        for comp in result.chain:
-            if isinstance(comp, Plain):
-                original_text = comp.text
-                filtered_text = FOX_THOUGHT_PATTERN.sub("", original_text).strip()
-                if filtered_text != original_text:
-                    comp.text = filtered_text
-                    logger.debug("[lzpersona] 已过滤 fox_thought 标签")
 
     # ==================== 配置获取 ====================
 
