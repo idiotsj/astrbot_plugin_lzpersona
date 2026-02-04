@@ -44,7 +44,6 @@ PERSONA_CARD_TEMPLATE = """
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { 
-            width: 600px;
             font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 20px;
@@ -52,7 +51,7 @@ PERSONA_CARD_TEMPLATE = """
     </style>
 </head>
 <body>
-<div style="width: 100%;">
+<div style="width: 560px;">
     <div style="
         background: rgba(255,255,255,0.95);
         border-radius: 12px;
