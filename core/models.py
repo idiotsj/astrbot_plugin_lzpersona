@@ -14,6 +14,16 @@ class SessionState(Enum):
     IDLE = "idle"  # 空闲
     WAITING_CONFIRM = "waiting_confirm"  # 等待确认
     WAITING_FEEDBACK = "waiting_feedback"  # 等待反馈（优化模式）
+    WAITING_MISSING_INPUT = "waiting_missing_input"  # 等待缺失内容输入（引导式生成）
+
+
+@dataclass
+class MissingField:
+    """缺失字段信息"""
+
+    field: str  # 字段标识
+    label: str  # 显示名称
+    hint: str  # 提示信息
 
 
 @dataclass
@@ -23,8 +33,11 @@ class PendingPersona:
     persona_id: str
     system_prompt: str
     created_at: float
-    mode: str  # "generate", "refine", "clone", "shrink"
+    mode: str  # "generate", "refine", "clone", "shrink", "guided"
     original_prompt: Optional[str] = None  # 原始提示词（用于对比）
+    original_description: Optional[str] = None  # 原始用户描述（引导式生成用）
+    missing_fields: Optional[list] = None  # 缺失字段列表（引导式生成用）
+    provided_fields: Optional[list] = None  # 已提供字段列表（引导式生成用）
 
 
 @dataclass

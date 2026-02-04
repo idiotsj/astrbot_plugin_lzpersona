@@ -4,6 +4,12 @@
     "description": "启用插件",
     "default": true
   },
+  "enable_guided_generation": {
+    "type": "bool",
+    "description": "启用引导式生成",
+    "default": true,
+    "hint": "启用后生成人格时会先分析描述缺失的字段，让用户选择补充"
+  },
   "architect_provider_id": {
     "type": "string",
     "description": "架构师模型 Provider ID（用于生成/优化人格）",

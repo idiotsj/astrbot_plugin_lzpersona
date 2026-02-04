@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event.filter import session_waiter
+from astrbot.api.message.components import Plain
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.star_tools import StarTools
@@ -31,6 +34,80 @@ from .core import (
 )
 from .services import LLMService, PersonaService
 from .utils import shorten_prompt, generate_persona_id, get_session_id
+
+# 思考标签过滤正则表达式
+FOX_THOUGHT_PATTERN = re.compile(r"<fox_thought>.*?</fox_thought>", re.DOTALL | re.IGNORECASE)
+
+# 人格卡片 HTML 模板
+PERSONA_CARD_TEMPLATE = """
+<div style="
+    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 20px;
+    border-radius: 16px;
+    max-width: 600px;
+">
+    <div style="
+        background: rgba(255,255,255,0.95);
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    ">
+        <div style="
+            display: flex;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e0e0e0;
+        ">
+            <span style="font-size: 28px; margin-right: 10px;">{{ icon }}</span>
+            <div>
+                <div style="font-size: 20px; font-weight: bold; color: #333;">{{ title }}</div>
+                <div style="font-size: 14px; color: #666;">{{ subtitle }}</div>
+            </div>
+        </div>
+        
+        {% if meta_info %}
+        <div style="
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        ">
+            {% for key, value in meta_info.items() %}
+            <div style="display: flex; margin-bottom: 4px;">
+                <span style="color: #666; min-width: 80px;">{{ key }}:</span>
+                <span style="color: #333; font-weight: 500;">{{ value }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        <div style="
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #333;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        ">{{ content }}</div>
+        
+        {% if footer %}
+        <div style="
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #e0e0e0;
+            font-size: 13px;
+            color: #666;
+        ">{{ footer }}</div>
+        {% endif %}
+    </div>
+</div>
+"""
 
 
 @register(
@@ -62,6 +139,23 @@ class QuickPersona(Star):
         )
 
         logger.info(f"[lzpersona] 插件初始化完成，数据目录: {self.data_dir}")
+
+    # ==================== 思考标签过滤 ====================
+
+    @filter.on_decorating_result()
+    async def filter_fox_thought(self, event: AstrMessageEvent):
+        """过滤 <fox_thought> 思考标签"""
+        result = event.get_result()
+        if result is None or not result.chain:
+            return
+
+        for comp in result.chain:
+            if isinstance(comp, Plain):
+                original_text = comp.text
+                filtered_text = FOX_THOUGHT_PATTERN.sub("", original_text).strip()
+                if filtered_text != original_text:
+                    comp.text = filtered_text
+                    logger.debug("[lzpersona] 已过滤 fox_thought 标签")
 
     # ==================== 配置获取 ====================
 
@@ -110,6 +204,38 @@ class QuickPersona(Star):
         except Exception as e:
             logger.warning(f"[lzpersona] 文转图失败，使用纯文本输出: {e}")
             yield event.plain_result(text)
+
+    async def _render_persona_card(
+        self, event: AstrMessageEvent, 
+        icon: str, title: str, subtitle: str,
+        content: str, meta_info: dict = None, footer: str = ""
+    ):
+        """渲染人格卡片为图片"""
+        try:
+            image_url = await self.html_render(
+                PERSONA_CARD_TEMPLATE,
+                {
+                    "icon": icon,
+                    "title": title,
+                    "subtitle": subtitle,
+                    "content": content,
+                    "meta_info": meta_info or {},
+                    "footer": footer,
+                }
+            )
+            yield event.image_result(image_url)
+        except Exception as e:
+            logger.warning(f"[lzpersona] 人格卡片渲染失败，使用纯文本输出: {e}")
+            # 降级为纯文本
+            lines = [f"{icon} {title}", subtitle, "-" * 30, content]
+            if meta_info:
+                lines.append("-" * 30)
+                for k, v in meta_info.items():
+                    lines.append(f"{k}: {v}")
+            if footer:
+                lines.append("-" * 30)
+                lines.append(footer)
+            yield event.plain_result("\n".join(lines))
 
     # ==================== 命令组 ====================
 
@@ -248,10 +374,38 @@ class QuickPersona(Star):
             async for r in self.cmd_help(event):
                 yield r
 
+    def _get_enable_guided_generation(self) -> bool:
+        """是否启用引导式生成"""
+        return bool(self._get_cfg("enable_guided_generation", True))
+
     @qp.command("生成人格", alias={"gen"})
     async def cmd_gen(self, event: AstrMessageEvent, description: GreedyStr = ""):
-        """根据描述生成人格"""
-        description = str(description).strip()
+        """根据描述生成人格（支持引导式生成）"""
+        # 直接从原始消息中提取描述，避免命令解析器截断问题
+        raw_message = event.get_message_str().strip()
+        
+        # 定义可能的命令前缀组合
+        prefixes = [
+            "/快捷人格 生成人格 ", "快捷人格 生成人格 ",
+            "/qp 生成人格 ", "qp 生成人格 ",
+            "/quickpersona 生成人格 ", "quickpersona 生成人格 ",
+            "/快捷人格 gen ", "快捷人格 gen ",
+            "/qp gen ", "qp gen ",
+            "/quickpersona gen ", "quickpersona gen ",
+        ]
+        
+        # 尝试从原始消息中提取描述部分
+        extracted = False
+        for prefix in prefixes:
+            # 使用不区分大小写的比较（仅对英文部分）
+            if raw_message.startswith(prefix) or raw_message.lower().startswith(prefix.lower()):
+                description = raw_message[len(prefix):].strip()
+                extracted = True
+                break
+        
+        if not extracted:
+            # 如果没有匹配到前缀，使用解析器的结果
+            description = str(description).strip()
 
         if not description:
             yield event.plain_result(
@@ -268,8 +422,233 @@ class QuickPersona(Star):
             )
             return
 
+        # 检查是否启用引导式生成
+        if self._get_enable_guided_generation():
+            async for r in self._guided_generation(event, description, session):
+                yield r
+        else:
+            async for r in self._quick_generation(event, description, session):
+                yield r
+
+    async def _guided_generation(
+        self, event: AstrMessageEvent, description: str, session
+    ):
+        """引导式生成流程"""
         yield event.plain_result(
-            f"🔄 正在根据描述生成人格...\n描述: {shorten_prompt(description, 50)}"
+            f"🎭 正在分析你的人格描述...\n描述: {description}"
+        )
+
+        # 分析缺失字段
+        analysis = await self.llm_service.analyze_missing_fields(description, event)
+        missing_fields = analysis.get("missing", [])
+        provided_fields = analysis.get("provided", [])
+
+        if not missing_fields:
+            # 没有缺失字段，直接生成
+            yield event.plain_result("✅ 描述完整，正在生成人格...")
+            async for r in self._quick_generation(event, description, session):
+                yield r
+            return
+
+        # 构建缺失字段提示信息
+        lines = ["📋 检测到以下设定缺失，请选择要补充的内容：", ""]
+        field_map = {}  # 用于存储序号到字段的映射
+        for i, field in enumerate(missing_fields, 1):
+            label = field.get("label", field.get("field", "未知"))
+            hint = field.get("hint", "")
+            lines.append(f"{i}️⃣ {label}（{hint}）")
+            field_map[str(i)] = field
+
+        lines.extend([
+            "",
+            "💡 回复对应数字（如\"2,3\"）并补充内容",
+            "💡 回复\"跳过\"让 AI 自动生成所有缺失部分",
+        ])
+
+        yield event.plain_result("\n".join(lines))
+
+        # 保存状态，等待用户回复
+        session.state = SessionState.WAITING_MISSING_INPUT
+        session.pending_persona = PendingPersona(
+            persona_id="",  # 稍后生成
+            system_prompt="",  # 稍后生成
+            created_at=time.time(),
+            mode="guided",
+            original_description=description,
+            missing_fields=missing_fields,
+            provided_fields=provided_fields,
+        )
+
+        # 使用 session_waiter 等待用户回复
+        @session_waiter(timeout=120, record_history_chains=False)
+        async def wait_for_missing_input(w_event: AstrMessageEvent):
+            return True  # 接受任何回复
+
+        try:
+            user_reply_event = await wait_for_missing_input(event)
+            user_reply = user_reply_event.message_str.strip()
+        except TimeoutError:
+            session.state = SessionState.IDLE
+            session.pending_persona = None
+            yield event.plain_result("⏰ 等待超时，已取消生成")
+            return
+
+        # 处理用户回复
+        async for r in self._process_missing_input(
+            event, user_reply, description, missing_fields, provided_fields, session
+        ):
+            yield r
+
+    async def _process_missing_input(
+        self, event: AstrMessageEvent, user_reply: str, 
+        description: str, missing_fields: list, provided_fields: list, session
+    ):
+        """处理用户对缺失字段的回复"""
+        user_reply = user_reply.strip()
+
+        if user_reply.lower() in ["跳过", "skip", "s"]:
+            # 用户选择跳过，让 AI 自动生成所有缺失部分
+            yield event.plain_result("⏭️ 已跳过，AI 将自动生成缺失部分...")
+            auto_generate_fields = [f.get("label", f.get("field")) for f in missing_fields]
+            async for r in self._generate_with_supplements(
+                event, description, "", auto_generate_fields, session
+            ):
+                yield r
+            return
+
+        # 解析用户选择的字段编号和补充内容
+        # 期望格式: "2,3 主人，喜欢在句尾加nya"
+        import re
+        
+        # 尝试匹配 "数字,数字 内容" 或 "数字 内容" 的格式
+        match = re.match(r'^([\d,\s]+)\s*(.*)$', user_reply)
+        
+        if not match:
+            # 如果格式不正确，将整个回复作为补充内容，让 AI 生成所有缺失字段
+            yield event.plain_result("📝 已收到补充信息，正在生成人格...")
+            auto_generate_fields = [f.get("label", f.get("field")) for f in missing_fields]
+            async for r in self._generate_with_supplements(
+                event, description, user_reply, auto_generate_fields, session
+            ):
+                yield r
+            return
+
+        selected_nums_str = match.group(1)
+        supplements = match.group(2).strip()
+
+        # 解析选中的字段编号
+        selected_nums = set()
+        for num in re.findall(r'\d+', selected_nums_str):
+            selected_nums.add(num)
+
+        # 确定哪些字段由用户补充，哪些由 AI 生成
+        user_selected_fields = []
+        auto_generate_fields = []
+
+        for i, field in enumerate(missing_fields, 1):
+            label = field.get("label", field.get("field"))
+            if str(i) in selected_nums:
+                user_selected_fields.append(label)
+            else:
+                auto_generate_fields.append(label)
+
+        # 构建补充信息说明
+        if user_selected_fields:
+            supplements_info = f"用户为以下字段提供了信息: {', '.join(user_selected_fields)}\n内容: {supplements}"
+        else:
+            supplements_info = supplements
+
+        yield event.plain_result(
+            f"✅ 已收集，正在生成完整人格...\n"
+            f"📝 用户补充: {', '.join(user_selected_fields) if user_selected_fields else '无'}\n"
+            f"🤖 AI 生成: {', '.join(auto_generate_fields) if auto_generate_fields else '无'}"
+        )
+
+        async for r in self._generate_with_supplements(
+            event, description, supplements_info, auto_generate_fields, session
+        ):
+            yield r
+
+    async def _generate_with_supplements(
+        self, event: AstrMessageEvent, description: str, 
+        supplements: str, auto_generate_fields: list, session
+    ):
+        """根据补充信息生成人格"""
+        result = await self.llm_service.generate_with_supplements(
+            description, supplements, auto_generate_fields, event
+        )
+
+        if not result:
+            session.state = SessionState.IDLE
+            session.pending_persona = None
+            yield event.plain_result("❌ 生成失败，请检查 LLM 配置或稍后重试")
+            return
+
+        # 自动压缩
+        max_len = self._get_max_prompt_length()
+        if len(result) > max_len and self._get_auto_compress():
+            yield event.plain_result(
+                f"⚠️ 生成的提示词过长({len(result)}字符)，正在自动压缩..."
+            )
+            shrink_template = self._get_template(
+                "persona_shrink_template", DEFAULT_SHRINK_TEMPLATE
+            )
+            shrink_prompt = shrink_template.format(
+                original_prompt=result, intensity="轻度"
+            )
+            compressed = await self.llm_service.call_architect(shrink_prompt, event)
+            if compressed and len(compressed) < len(result):
+                result = compressed
+
+        persona_id = generate_persona_id(description)
+
+        if self._get_confirm_before_apply():
+            session.state = SessionState.WAITING_CONFIRM
+            session.pending_persona = PendingPersona(
+                persona_id=persona_id,
+                system_prompt=result,
+                created_at=time.time(),
+                mode="guided",
+            )
+
+            # 使用图片卡片展示
+            async for r in self._render_persona_card(
+                event,
+                icon="🎭",
+                title=f"人格生成完成",
+                subtitle=f"模式: 引导式生成 | 待确认",
+                content=result,
+                meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                footer="发送 /快捷人格 确认应用 或 /快捷人格 取消操作"
+            ):
+                yield r
+        else:
+            user_name = event.get_sender_name() or "User"
+            success = await self.persona_service.create_or_update(
+                persona_id, result, backup=False, user_name=user_name
+            )
+            if success:
+                session.state = SessionState.IDLE
+                session.pending_persona = None
+                session.current_persona_id = persona_id
+                async for r in self._render_persona_card(
+                    event,
+                    icon="✅",
+                    title=f"人格已创建并应用",
+                    subtitle=f"模式: 引导式生成",
+                    content=result,
+                    meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                ):
+                    yield r
+            else:
+                session.state = SessionState.IDLE
+                session.pending_persona = None
+                yield event.plain_result("❌ 应用人格失败，请查看日志")
+
+    async def _quick_generation(self, event: AstrMessageEvent, description: str, session):
+        """快速生成流程（原有逻辑）"""
+        yield event.plain_result(
+            f"🔄 正在根据描述生成人格...\n描述: {description}"
         )
 
         # 构建提示词并调用 LLM
@@ -308,13 +687,17 @@ class QuickPersona(Star):
                 mode="generate",
             )
 
-            yield event.plain_result(
-                f"✅ 人格生成完成！\n\n"
-                f"📌 人格ID: {persona_id}\n"
-                f"📝 提示词 ({len(result)}字符):\n{shorten_prompt(result, 300)}\n\n"
-                f"发送 /快捷人格 确认应用 应用此人格\n"
-                f"发送 /快捷人格 取消操作 取消"
-            )
+            # 使用图片卡片展示
+            async for r in self._render_persona_card(
+                event,
+                icon="🎭",
+                title=f"人格生成完成",
+                subtitle=f"模式: 快速生成 | 待确认",
+                content=result,
+                meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                footer="发送 /快捷人格 确认应用 或 /快捷人格 取消操作"
+            ):
+                yield r
         else:
             # 获取用户名用于占位符替换
             user_name = event.get_sender_name() or "User"
@@ -323,11 +706,15 @@ class QuickPersona(Star):
             )
             if success:
                 session.current_persona_id = persona_id
-                yield event.plain_result(
-                    f"✅ 人格已创建并应用！\n\n"
-                    f"📌 人格ID: {persona_id}\n"
-                    f"📝 提示词 ({len(result)}字符):\n{shorten_prompt(result, 300)}"
-                )
+                async for r in self._render_persona_card(
+                    event,
+                    icon="✅",
+                    title=f"人格已创建并应用",
+                    subtitle=f"模式: 快速生成",
+                    content=result,
+                    meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                ):
+                    yield r
             else:
                 yield event.plain_result("❌ 应用人格失败，请查看日志")
 
@@ -555,7 +942,7 @@ class QuickPersona(Star):
             yield event.plain_result(
                 f"🔄 正在优化待确认的人格...\n"
                 f"📌 人格ID: {persona_id}\n"
-                f"反馈: {shorten_prompt(feedback, 50)}"
+                f"反馈: {feedback}"
             )
         else:
             # 否则对已选择的人格进行优化
@@ -577,7 +964,7 @@ class QuickPersona(Star):
                 return
 
             yield event.plain_result(
-                f"🔄 正在根据反馈优化人格...\n反馈: {shorten_prompt(feedback, 50)}"
+                f"🔄 正在根据反馈优化人格...\n反馈: {feedback}"
             )
 
         template = self._get_template(
@@ -604,14 +991,16 @@ class QuickPersona(Star):
             )
 
             status_hint = "（已更新待确认人格）" if is_pending else ""
-            yield event.plain_result(
-                f"✅ 人格优化完成！{status_hint}\n\n"
-                f"📌 人格ID: {persona_id}\n"
-                f"📝 优化后提示词 ({len(result)}字符):\n{shorten_prompt(result, 300)}\n\n"
-                f"💡 可以继续发送反馈进行优化，或者：\n"
-                f"发送 /快捷人格 确认应用 应用此人格\n"
-                f"发送 /快捷人格 取消操作 取消"
-            )
+            async for r in self._render_persona_card(
+                event,
+                icon="✨",
+                title=f"人格优化完成{status_hint}",
+                subtitle=f"模式: 优化 | 待确认",
+                content=result,
+                meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                footer="可继续发送反馈优化，或 /快捷人格 确认应用"
+            ):
+                yield r
         else:
             # 获取用户名用于占位符替换
             user_name = event.get_sender_name() or "User"
@@ -619,10 +1008,15 @@ class QuickPersona(Star):
                 persona_id, result, backup=True, user_name=user_name
             )
             if success:
-                yield event.plain_result(
-                    f"✅ 人格已优化！\n📌 人格ID: {persona_id}\n"
-                    f"📝 新提示词 ({len(result)}字符):\n{shorten_prompt(result, 300)}"
-                )
+                async for r in self._render_persona_card(
+                    event,
+                    icon="✅",
+                    title=f"人格已优化",
+                    subtitle=f"模式: 优化",
+                    content=result,
+                    meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                ):
+                    yield r
             else:
                 yield event.plain_result("❌ 应用失败，请查看日志")
 
@@ -681,13 +1075,20 @@ class QuickPersona(Star):
                 original_prompt=persona.system_prompt,
             )
 
-            yield event.plain_result(
-                f"✅ 压缩完成！\n\n"
-                f"📊 压缩效果: {original_len} → {new_len} 字符 (减少 {reduction}%)\n"
-                f"📝 压缩后提示词:\n{shorten_prompt(result, 300)}\n\n"
-                f"发送 /快捷人格 确认应用 应用此更改\n"
-                f"发送 /快捷人格 取消操作 取消"
-            )
+            async for r in self._render_persona_card(
+                event,
+                icon="📦",
+                title=f"压缩完成",
+                subtitle=f"强度: {intensity} | 待确认",
+                content=result,
+                meta_info={
+                    "人格ID": persona_id,
+                    "压缩效果": f"{original_len} → {new_len} 字符",
+                    "减少比例": f"{reduction}%"
+                },
+                footer="发送 /快捷人格 确认应用 或 /快捷人格 取消操作"
+            ):
+                yield r
         else:
             # 获取用户名用于占位符替换
             user_name = event.get_sender_name() or "User"
@@ -695,10 +1096,19 @@ class QuickPersona(Star):
                 persona_id, result, backup=True, user_name=user_name
             )
             if success:
-                yield event.plain_result(
-                    f"✅ 压缩完成并已应用！\n"
-                    f"📊 压缩效果: {original_len} → {new_len} 字符 (减少 {reduction}%)"
-                )
+                async for r in self._render_persona_card(
+                    event,
+                    icon="✅",
+                    title=f"压缩完成并已应用",
+                    subtitle=f"强度: {intensity}",
+                    content=result,
+                    meta_info={
+                        "人格ID": persona_id,
+                        "压缩效果": f"{original_len} → {new_len} 字符",
+                        "减少比例": f"{reduction}%"
+                    },
+                ):
+                    yield r
             else:
                 yield event.plain_result("❌ 应用失败，请查看日志")
 

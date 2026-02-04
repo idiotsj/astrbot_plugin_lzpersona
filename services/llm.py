@@ -139,6 +139,88 @@ class LLMService:
             # 尝试简单的关键词匹配作为降级方案
             return self._fallback_intent_match(query)
 
+    async def analyze_missing_fields(
+        self, description: str, event: "AstrMessageEvent"
+    ) -> dict:
+        """分析用户描述中缺失的字段
+
+        Args:
+            description: 用户的人格描述
+            event: 消息事件
+
+        Returns:
+            包含 provided 和 missing 字段的字典
+        """
+        from ..core import DEFAULT_MISSING_ANALYSIS_TEMPLATE
+
+        prompt = DEFAULT_MISSING_ANALYSIS_TEMPLATE.format(description=description)
+
+        result = await self.call_architect(prompt, event)
+
+        if not result:
+            logger.warning("[lzpersona] 缺失字段分析失败，返回默认结果")
+            return self._get_default_missing_fields()
+
+        try:
+            # 尝试提取 JSON 部分
+            json_match = re.search(r'\{[^{}]*"provided"[^{}]*"missing"[^{}]*\}', result, re.DOTALL)
+            if json_match:
+                analysis = json.loads(json_match.group())
+            else:
+                # 尝试直接解析
+                analysis = json.loads(result)
+
+            # 验证结构
+            if "provided" not in analysis or "missing" not in analysis:
+                logger.warning("[lzpersona] 分析结果缺少必要字段")
+                return self._get_default_missing_fields()
+
+            return analysis
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[lzpersona] 缺失字段分析 JSON 解析失败: {e}")
+            return self._get_default_missing_fields()
+
+    def _get_default_missing_fields(self) -> dict:
+        """返回默认的缺失字段列表"""
+        return {
+            "provided": [],
+            "missing": [
+                {"field": "appearance", "label": "外貌特征", "hint": "如发色、服装风格"},
+                {"field": "user_identity", "label": "用户身份", "hint": "如主人、朋友、邻居"},
+                {"field": "speech_style", "label": "说话风格", "hint": "语气、口癖、常用词"},
+                {"field": "background", "label": "背景故事", "hint": "职业或简要经历"},
+                {"field": "initial_attitude", "label": "初始态度", "hint": "对用户是友好还是冷淡"},
+            ]
+        }
+
+    async def generate_with_supplements(
+        self, description: str, supplements: str, auto_generate_fields: list, event: "AstrMessageEvent"
+    ) -> Optional[str]:
+        """根据用户描述和补充内容生成人格
+
+        Args:
+            description: 原始用户描述
+            supplements: 用户补充的内容
+            auto_generate_fields: 需要由 AI 自动生成的字段列表
+            event: 消息事件
+
+        Returns:
+            生成的人格提示词
+        """
+        from ..core import DEFAULT_GUIDED_GEN_TEMPLATE
+
+        # 格式化自动生成字段
+        auto_fields_str = ", ".join(auto_generate_fields) if auto_generate_fields else "无"
+
+        prompt = DEFAULT_GUIDED_GEN_TEMPLATE.format(
+            description=description,
+            supplements=supplements if supplements else "无",
+            auto_generate_fields=auto_fields_str,
+        )
+
+        return await self.call_architect(prompt, event)
+
     def _fallback_intent_match(self, query: str) -> dict:
         """降级的关键词意图匹配"""
         query_lower = query.lower()

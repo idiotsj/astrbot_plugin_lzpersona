@@ -10,8 +10,10 @@ from .constants import (
     DEFAULT_CLONE_TEMPLATE,
     DEFAULT_INTROSPECT_TEMPLATE,
     DEFAULT_INTENT_TEMPLATE,
+    DEFAULT_MISSING_ANALYSIS_TEMPLATE,
+    DEFAULT_GUIDED_GEN_TEMPLATE,
 )
-from .models import SessionState, PendingPersona, PersonaBackup, SessionData
+from .models import SessionState, PendingPersona, PersonaBackup, SessionData, MissingField
 from .state import QuickPersonaState
 
 __all__ = [
@@ -26,11 +28,14 @@ __all__ = [
     "DEFAULT_CLONE_TEMPLATE",
     "DEFAULT_INTROSPECT_TEMPLATE",
     "DEFAULT_INTENT_TEMPLATE",
+    "DEFAULT_MISSING_ANALYSIS_TEMPLATE",
+    "DEFAULT_GUIDED_GEN_TEMPLATE",
     # 数据模型
     "SessionState",
     "PendingPersona",
     "PersonaBackup",
     "SessionData",
+    "MissingField",
     # 状态管理
     "QuickPersonaState",
 ]
