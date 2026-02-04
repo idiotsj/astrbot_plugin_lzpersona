@@ -43,15 +43,20 @@ PERSONA_CARD_TEMPLATE = """
     <meta charset="UTF-8">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { 
+        html { 
             font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+        }
+        body {
+            display: inline-block;
+            min-width: 400px;
+            max-width: 600px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 20px;
         }
     </style>
 </head>
 <body>
-<div style="width: 560px;">
+<div>
     <div style="
         background: rgba(255,255,255,0.95);
         border-radius: 12px;
@@ -213,8 +218,7 @@ class QuickPersona(Star):
                     "footer": footer,
                 },
                 options={
-                    "full_page": False,  # 不截取整页，只截取视口区域
-                    "clip": {"x": 0, "y": 0, "width": 600, "height": 2000},  # 裁剪区域
+                    "full_page": True,  # 截取整页，让 body 的 inline-block 自适应宽度
                 }
             )
             yield event.image_result(image_url)
