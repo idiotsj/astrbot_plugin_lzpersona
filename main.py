@@ -465,8 +465,9 @@ class QuickPersona(Star):
             controller: SessionController,
             w_event: AstrMessageEvent,
         ):
-            controller.stop()  # 停止会话，返回结果
-            return w_event
+            # 直接设置 future 结果而不是调用 stop()
+            if not controller.future.done():
+                controller.future.set_result(w_event)
 
         try:
             user_reply_event = await wait_for_missing_input(event)
