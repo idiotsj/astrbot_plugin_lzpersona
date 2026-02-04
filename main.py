@@ -35,7 +35,7 @@ from .core import (
 from .services import LLMService, PersonaService
 from .utils import shorten_prompt, generate_persona_id, get_session_id
 
-# 人格卡片 HTML 模板
+# 经过优化的人格卡片 HTML 模板
 PERSONA_CARD_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -43,80 +43,102 @@ PERSONA_CARD_TEMPLATE = """
     <meta charset="UTF-8">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html { 
-            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
-        }
-        body {
-            display: inline-block;
-            min-width: 400px;
-            max-width: 600px;
+        
+        html, body {
+            width: 100%;
+            min-height: 100vh;
+            /* 修正点 1: 使用 flex 布局让子元素居中 */
+            display: flex;
+            justify-content: center; /* 水平居中 */
+            align-items: flex-start; /* 顶部对齐，防止长内容被截断 */
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px;
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            padding: 40px 20px;
+        }
+
+        /* 修正点 2: 卡片容器 */
+        .card {
+            width: 100%;
+            max-width: 700px; /* 宽度可以根据需要微调 */
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        /* 头部样式优化 */
+        .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1.5px solid #eee;
+        }
+        .icon { font-size: 32px; margin-right: 15px; }
+        .title-group { flex-grow: 1; }
+        .title { font-size: 22px; font-weight: bold; color: #1a1a1a; }
+        .subtitle { font-size: 14px; color: #666; margin-top: 4px; }
+
+        /* 元数据区（ID、字数等） */
+        .meta-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 25px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .meta-item { font-size: 14px; color: #444; }
+        .meta-label { color: #888; margin-right: 5px; }
+
+        /* 内容区：支持换行和保留空格 */
+        .content {
+            font-size: 15px;
+            line-height: 1.8;
+            color: #333;
+            white-space: pre-wrap; /* 关键：保留换行 */
+            word-wrap: break-word;
+            text-align: justify; /* 两端对齐，更美观 */
+        }
+
+        /* 底部操作提示 */
+        .footer {
+            margin-top: 25px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            font-size: 13px;
+            color: #999;
         }
     </style>
 </head>
 <body>
-<div>
-    <div style="
-        background: rgba(255,255,255,0.95);
-        border-radius: 12px;
-        padding: 24px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-    ">
-        <div style="
-            display: flex;
-            align-items: center;
-            margin-bottom: 16px;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #e0e0e0;
-        ">
-            <span style="font-size: 28px; margin-right: 10px;">{{ icon }}</span>
-            <div>
-                <div style="font-size: 20px; font-weight: bold; color: #333;">{{ title }}</div>
-                <div style="font-size: 14px; color: #666;">{{ subtitle }}</div>
+    <div class="card">
+        <div class="header">
+            <span class="icon">{{ icon }}</span>
+            <div class="title-group">
+                <div class="title">{{ title }}</div>
+                <div class="subtitle">{{ subtitle }}</div>
             </div>
         </div>
         
         {% if meta_info %}
-        <div style="
-            background: #f5f5f5;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 16px;
-            font-size: 14px;
-        ">
+        <div class="meta-container">
             {% for key, value in meta_info.items() %}
-            <div style="display: flex; margin-bottom: 4px;">
-                <span style="color: #666; min-width: 80px;">{{ key }}:</span>
-                <span style="color: #333; font-weight: 500;">{{ value }}</span>
+            <div class="meta-item">
+                <span class="meta-label">{{ key }}:</span>
+                <span class="meta-value">{{ value }}</span>
             </div>
             {% endfor %}
         </div>
         {% endif %}
         
-        <div style="
-            background: #fafafa;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 16px;
-            font-size: 14px;
-            line-height: 1.8;
-            color: #333;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        ">{{ content }}</div>
+        <div class="content">{{ content }}</div>
         
         {% if footer %}
-        <div style="
-            margin-top: 16px;
-            padding-top: 12px;
-            border-top: 1px solid #e0e0e0;
-            font-size: 13px;
-            color: #666;
-        ">{{ footer }}</div>
+        <div class="footer">{{ footer }}</div>
         {% endif %}
     </div>
-</div>
 </body>
 </html>
 """
