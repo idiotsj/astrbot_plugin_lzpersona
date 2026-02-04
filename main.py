@@ -14,7 +14,7 @@ from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.util import session_waiter
+from astrbot.api.util import session_waiter, SessionController
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
@@ -461,8 +461,12 @@ class QuickPersona(Star):
 
         # 使用 session_waiter 等待用户回复
         @session_waiter(timeout=120, record_history_chains=False)
-        async def wait_for_missing_input(w_event: AstrMessageEvent):
-            return True  # 接受任何回复
+        async def wait_for_missing_input(
+            controller: SessionController,
+            w_event: AstrMessageEvent,
+        ):
+            controller.stop()  # 停止会话，返回结果
+            return w_event
 
         try:
             user_reply_event = await wait_for_missing_input(event)
