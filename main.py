@@ -476,7 +476,14 @@ class QuickPersona(Star):
             controller: SessionController,
             w_event: AstrMessageEvent,
         ):
-            # 直接设置 future 结果而不是调用 stop()
+            # 过滤掉空消息（如"正在输入"通知）
+            message_text = w_event.message_str.strip() if w_event.message_str else ""
+            if not message_text:
+                # 保持会话，继续等待有效消息
+                controller.keep(timeout=120)
+                return
+            
+            # 收到有效消息，设置 future 结果
             if not controller.future.done():
                 controller.future.set_result(w_event)
 
