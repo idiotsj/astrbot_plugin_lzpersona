@@ -148,7 +148,7 @@ PERSONA_CARD_TEMPLATE = """
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.3", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.4", ""
 )
 class QuickPersona(Star):
     """快捷人格生成器插件
@@ -296,23 +296,23 @@ class QuickPersona(Star):
 
 📝 生成与优化
 /快捷人格 生成人格 <描述> - 根据描述生成人格
-/快捷人格 优化人格 <反馈> - 优化人格（可直接优化未应用的人格）
+/快捷人格 优化人格 <反馈> - 优化人格（可直接优化未生成的人格）
 /快捷人格 压缩人格 [强度] - 压缩提示词(轻度/中度/极限)
 
 📋 管理
 /快捷人格 查看状态 - 查看当前状态
-/快捷人格 确认应用 - 应用待确认的人格
+/快捷人格 确认生成 - 确认并保存待确认的人格
 /快捷人格 取消操作 - 取消待确认的人格
 /快捷人格 人格列表 - 列出所有人格
 /快捷人格 选择人格 <人格ID> - 选择人格
-/快捷人格 激活人格 [人格ID] - 激活人格到当前对话
+/快捷人格 应用人格 [人格ID] - 应用人格到当前对话
 /快捷人格 删除人格 <人格ID> - 删除人格
 
 💡 使用流程示例：
   /人格 生成一个傲娇猫娘  → 生成人格
-  /人格 让她更傲娇一点    → 直接优化未应用的人格
-  /人格 确认              → 满意后应用
-  /人格 激活              → 让AI使用此人格"""
+  /人格 让她更傲娇一点    → 直接优化未生成的人格
+  /人格 确认              → 满意后保存人格
+  /人格 应用              → 让AI使用此人格"""
         yield event.plain_result(help_text)
 
     # ==================== 智能入口 ====================
@@ -460,7 +460,7 @@ class QuickPersona(Star):
 
         if session.state == SessionState.WAITING_CONFIRM:
             yield event.plain_result(
-                "你有一个待确认的人格，请先 /快捷人格 确认应用 或 /快捷人格 取消操作"
+                "你有一个待确认的人格，请先 /快捷人格 确认生成 或 /快捷人格 取消操作"
             )
             return
 
@@ -674,7 +674,7 @@ class QuickPersona(Star):
                 subtitle=f"模式: 引导式生成 | 待确认",
                 content=result,
                 meta_info={"人格ID": persona_id, "字符数": str(len(result))},
-                footer="发送 /快捷人格 确认应用 或 /快捷人格 取消操作"
+                footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
             ):
                 yield r
         else:
@@ -750,7 +750,7 @@ class QuickPersona(Star):
                 subtitle=f"模式: 快速生成 | 待确认",
                 content=result,
                 meta_info={"人格ID": persona_id, "字符数": str(len(result))},
-                footer="发送 /快捷人格 确认应用 或 /快捷人格 取消操作"
+                footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
             ):
                 yield r
         else:
@@ -773,9 +773,9 @@ class QuickPersona(Star):
             else:
                 yield event.plain_result("❌ 应用人格失败，请查看日志")
 
-    @qp.command("确认应用", alias={"apply", "yes"})
+    @qp.command("确认生成", alias={"confirm", "yes"})
     async def cmd_apply(self, event: AstrMessageEvent):
-        """应用待确认的人格"""
+        """确认并保存待确认的人格"""
         try:
             session_id = get_session_id(event)
             session = self.state.get_session(session_id)
@@ -797,15 +797,15 @@ class QuickPersona(Star):
                 session.pending_persona = None
 
                 yield event.plain_result(
-                    f"✅ 人格已应用！\n"
+                    f"✅ 人格已保存！\n"
                     f"📌 人格ID: {pending.persona_id}\n"
-                    f"💡 使用 /快捷人格 激活人格 让 AI 使用此人格"
+                    f"💡 使用 /快捷人格 应用人格 让 AI 使用此人格"
                 )
             else:
-                yield event.plain_result("❌ 应用失败，请查看日志")
+                yield event.plain_result("❌ 保存失败，请查看日志")
         except Exception as e:
-            logger.error(f"[lzpersona] 应用人格失败: {e}")
-            yield event.plain_result(f"❌ 应用人格失败: {e}")
+            logger.error(f"[lzpersona] 保存人格失败: {e}")
+            yield event.plain_result(f"❌ 保存人格失败: {e}")
         finally:
             event.stop_event()
 
@@ -1069,7 +1069,7 @@ class QuickPersona(Star):
                 subtitle=f"模式: 优化 | 待确认",
                 content=result,
                 meta_info={"人格ID": persona_id, "字符数": str(len(result))},
-                footer="可继续发送反馈优化，或 /快捷人格 确认应用"
+                footer="可继续发送反馈优化，或 /快捷人格 确认生成"
             ):
                 yield r
         else:
@@ -1157,7 +1157,7 @@ class QuickPersona(Star):
                     "压缩效果": f"{original_len} → {new_len} 字符",
                     "减少比例": f"{reduction}%"
                 },
-                footer="发送 /快捷人格 确认应用 或 /快捷人格 取消操作"
+                footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
             ):
                 yield r
         else:
@@ -1205,12 +1205,12 @@ class QuickPersona(Star):
         yield event.plain_result(
             f"✅ 已选择人格: {persona_id}\n"
             f"后续的 优化人格/压缩人格 操作将针对此人格\n\n"
-            f"💡 使用 /快捷人格 激活人格 激活到当前对话"
+            f"💡 使用 /快捷人格 应用人格 应用到当前对话"
         )
 
-    @qp.command("激活人格", alias={"activate"})
+    @qp.command("应用人格", alias={"activate", "apply"})
     async def cmd_activate(self, event: AstrMessageEvent, persona_id: str = ""):
-        """激活人格到当前对话"""
+        """应用人格到当前对话"""
         try:
             session_id = get_session_id(event)
             session = self.state.get_session(session_id)
@@ -1220,7 +1220,7 @@ class QuickPersona(Star):
 
             if not persona_id:
                 yield event.plain_result(
-                    "请指定人格ID，例如: /快捷人格 激活人格 qp_猫娘_abc123\n"
+                    "请指定人格ID，例如: /快捷人格 应用人格 qp_猫娘_abc123\n"
                     "或先使用 /快捷人格 选择人格 选择一个人格"
                 )
                 return
@@ -1241,11 +1241,11 @@ class QuickPersona(Star):
                 session.current_persona_id = persona_id
                 yield event.plain_result(f"✅ {msg}\n📌 AI 的下一条回复将使用新人格")
             else:
-                yield event.plain_result(f"❌ 激活失败: {msg}")
+                yield event.plain_result(f"❌ 应用失败: {msg}")
 
         except Exception as e:
-            logger.error(f"[lzpersona] 激活人格失败: {e}")
-            yield event.plain_result(f"❌ 激活人格失败: {e}")
+            logger.error(f"[lzpersona] 应用人格失败: {e}")
+            yield event.plain_result(f"❌ 应用人格失败: {e}")
         finally:
             event.stop_event()
 
@@ -1275,12 +1275,12 @@ class QuickPersona(Star):
             if persona_id:
                 session.current_persona_id = persona_id
                 yield event.plain_result(
-                    f"✅ 已创建新对话并激活人格\n📌 对话ID: {result}\n🎭 人格: {persona_id}"
+                    f"✅ 已创建新对话并应用人格\n📌 对话ID: {result}\n🎭 人格: {persona_id}"
                 )
             else:
                 yield event.plain_result(
                     f"✅ 已创建新对话\n📌 对话ID: {result}\n"
-                    f"💡 使用 /快捷人格 激活人格 <人格ID> 指定人格"
+                    f"💡 使用 /快捷人格 应用人格 <人格ID> 指定人格"
                 )
         else:
             yield event.plain_result(f"❌ 新建对话失败: {result}")

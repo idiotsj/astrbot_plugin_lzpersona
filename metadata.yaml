@@ -1,7 +1,7 @@
 name: astrbot_plugin_lzpersona
 display_name: LZ快捷人格生成器
 desc: AI 驱动的人格生成、优化、画像工具。通过简单描述生成人格，智能优化提示词，与 AstrBot 原生 Persona 系统无缝集成。
-version: v1.0.3
+version: v1.0.4
 author: idiotsj
 repo: https://github.com/idiotsj/astrbot_plugin_lzpersona
 help: |
@@ -13,13 +13,13 @@ help: |
   /快捷人格 生成人格 <描述>     - 根据描述生成人格
   /快捷人格 优化人格 <反馈>     - 根据反馈优化当前人格
   /快捷人格 压缩人格 [强度]     - 压缩人格提示词
-  /快捷人格 确认应用            - 应用待确认的人格
+  /快捷人格 确认生成            - 确认并保存待确认的人格
   /快捷人格 取消操作            - 取消待确认的人格
   /快捷人格 历史版本            - 查看历史版本列表
   /快捷人格 版本回滚            - 回滚到上一个版本
   /快捷人格 人格列表            - 列出所有人格
   /快捷人格 查看详情 <人格ID>   - 查看人格详情
-  /快捷人格 激活人格 [人格ID]   - 激活人格到当前对话
+  /快捷人格 应用人格 [人格ID]   - 应用人格到当前对话
   
   别名: /qp 或 /quickpersona
   
