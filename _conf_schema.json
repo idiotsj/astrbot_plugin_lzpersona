@@ -29,18 +29,6 @@
     "default": true,
     "hint": "启用后会在生成人格后自动执行瘦身优化"
   },
-  "max_log_samples": {
-    "type": "int",
-    "description": "画像/自省时最大采样对话条数",
-    "default": 30,
-    "hint": "执行人格画像或自省时，最多提取多少条对话记录"
-  },
-  "sampling_strategy": {
-    "type": "string",
-    "description": "对话采样策略",
-    "default": "latest",
-    "hint": "可选: latest(最近的), distributed(均匀分布), random(随机)"
-  },
   "confirm_before_apply": {
     "type": "bool",
     "description": "应用人格前需要确认",
@@ -53,29 +41,11 @@
     "default": 5,
     "hint": "本地保留多少个历史人格版本，用于回滚"
   },
-  "show_intermediate_steps": {
-    "type": "bool",
-    "description": "显示生成过程",
-    "default": false,
-    "hint": "显示架构师的思考过程和修改要点"
-  },
   "architect_timeout": {
     "type": "int",
     "description": "架构师模型超时时间(秒)",
     "default": 60,
     "hint": "调用 LLM 生成人格的超时时间"
-  },
-  "ignore_keywords": {
-    "type": "string",
-    "description": "忽略关键词（逗号分隔）",
-    "default": "[CQ:,已撤回,进群,退群,@全体成员",
-    "hint": "分析聊天记录时忽略包含这些关键词的消息"
-  },
-  "merge_consecutive_messages": {
-    "type": "bool",
-    "description": "合并连续消息",
-    "default": true,
-    "hint": "同一人连续发送的多条短消息会被合并，减少 Token 占用"
   },
   "persona_gen_template": {
     "type": "string",
@@ -94,5 +64,23 @@
     "description": "瘦身人格元提示词模板",
     "default": "",
     "hint": "高级：自定义压缩人格时的系统提示词。留空使用默认模板"
+  },
+  "profile_enabled": {
+    "type": "bool",
+    "description": "启用用户画像功能",
+    "default": false,
+    "hint": "启用后可通过 /画像 命令管理用户画像。需要手动添加监控目标"
+  },
+  "profile_min_messages": {
+    "type": "int",
+    "description": "画像更新最小消息数",
+    "default": 10,
+    "hint": "累积多少条消息后触发画像更新"
+  },
+  "profile_max_buffer_age": {
+    "type": "int",
+    "description": "画像缓冲区最大保留时间(秒)",
+    "default": 300,
+    "hint": "消息缓冲区超过此时间后触发更新（即使消息数未达阈值）"
   }
 }

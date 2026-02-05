@@ -15,7 +15,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.util import session_waiter, SessionController
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import Plain, Image
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.star_tools import StarTools
@@ -31,8 +31,11 @@ from .core import (
     SessionState,
     PendingPersona,
     QuickPersonaState,
+    # 画像相关
+    ProfileMode,
+    PROFILE_CARD_TEMPLATE,
 )
-from .services import LLMService, PersonaService
+from .services import LLMService, PersonaService, ProfileService
 from .utils import shorten_prompt, generate_persona_id, get_session_id
 
 # 经过优化的人格卡片 HTML 模板
@@ -145,7 +148,7 @@ PERSONA_CARD_TEMPLATE = """
 
 
 @register(
-    "astrbot_plugin_lzpersona", "LZD", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.0", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.2", ""
 )
 class QuickPersona(Star):
     """快捷人格生成器插件
@@ -171,8 +174,27 @@ class QuickPersona(Star):
         self.persona_service = PersonaService(
             context, self.state, self._get_backup_versions()
         )
+        
+        # 初始化画像服务
+        self.profile_service = ProfileService(context, self)
 
         logger.info(f"[lzpersona] 插件初始化完成，数据目录: {self.data_dir}")
+
+    async def terminate(self):
+        """插件卸载时的清理方法"""
+        try:
+            # 保存状态
+            await self.state.save_async()
+            
+            # 保存画像服务的缓冲区数据
+            if hasattr(self, 'profile_service') and self.profile_service._loaded:
+                await self.profile_service.save_buffers()
+                await self.profile_service.save_profiles()
+                await self.profile_service.save_monitors()
+            
+            logger.info("[lzpersona] 插件资源已清理")
+        except Exception as e:
+            logger.error(f"[lzpersona] 清理资源时出错: {e}")
 
     # ==================== 配置获取 ====================
 
@@ -840,7 +862,9 @@ class QuickPersona(Star):
 
         except Exception as e:
             logger.error(f"[lzpersona] 获取人格列表失败: {e}")
-            yield event.plain_result("❌ 获取列表失败")
+            yield event.plain_result(f"❌ 获取列表失败: {e}")
+        finally:
+            event.stop_event()
 
     @qp.command("查看详情", alias={"view"})
     async def cmd_view(self, event: AstrMessageEvent, persona_id: str = ""):
@@ -916,23 +940,23 @@ class QuickPersona(Star):
     @qp.command("版本回滚", alias={"rollback"})
     async def cmd_rollback(self, event: AstrMessageEvent, persona_id: str = ""):
         """回滚到上一个版本"""
-        if not persona_id:
-            session_id = get_session_id(event)
-            session = self.state.get_session(session_id)
-            persona_id = session.current_persona_id or ""
-
-        if not persona_id:
-            yield event.plain_result(
-                "请指定人格ID，例如: /快捷人格 版本回滚 qp_猫娘_abc123"
-            )
-            return
-
-        backup = self.state.get_latest_backup(persona_id)
-        if not backup:
-            yield event.plain_result(f"❌ 没有找到 {persona_id} 的备份")
-            return
-
         try:
+            if not persona_id:
+                session_id = get_session_id(event)
+                session = self.state.get_session(session_id)
+                persona_id = session.current_persona_id or ""
+
+            if not persona_id:
+                yield event.plain_result(
+                    "请指定人格ID，例如: /快捷人格 版本回滚 qp_猫娘_abc123"
+                )
+                return
+
+            backup = self.state.get_latest_backup(persona_id)
+            if not backup:
+                yield event.plain_result(f"❌ 没有找到 {persona_id} 的备份")
+                return
+
             await self.context.persona_manager.update_persona(
                 persona_id=persona_id, system_prompt=backup.system_prompt
             )
@@ -949,7 +973,9 @@ class QuickPersona(Star):
 
         except Exception as e:
             logger.error(f"[lzpersona] 回滚失败: {e}")
-            yield event.plain_result("❌ 回滚失败")
+            yield event.plain_result(f"❌ 回滚失败: {e}")
+        finally:
+            event.stop_event()
 
     @qp.command("优化人格", alias={"refine"})
     async def cmd_refine(self, event: AstrMessageEvent, feedback: GreedyStr = ""):
@@ -1173,36 +1199,43 @@ class QuickPersona(Star):
     @qp.command("激活人格", alias={"activate"})
     async def cmd_activate(self, event: AstrMessageEvent, persona_id: str = ""):
         """激活人格到当前对话"""
-        session_id = get_session_id(event)
-        session = self.state.get_session(session_id)
-
-        if not persona_id:
-            persona_id = session.current_persona_id or ""
-
-        if not persona_id:
-            yield event.plain_result(
-                "请指定人格ID，例如: /快捷人格 激活人格 qp_猫娘_abc123\n"
-                "或先使用 /快捷人格 选择人格 选择一个人格"
-            )
-            return
-
         try:
-            await self.persona_service.get_persona(persona_id)
-        except ValueError:
-            yield event.plain_result(f"❌ 未找到人格: {persona_id}")
-            return
+            session_id = get_session_id(event)
+            session = self.state.get_session(session_id)
 
-        umo = getattr(event, "unified_msg_origin", None)
-        if not umo:
-            yield event.plain_result("❌ 无法获取会话信息")
-            return
+            if not persona_id:
+                persona_id = session.current_persona_id or ""
 
-        success, msg = await self.persona_service.activate_persona(umo, persona_id)
-        if success:
-            session.current_persona_id = persona_id
-            yield event.plain_result(f"✅ {msg}\n📌 AI 的下一条回复将使用新人格")
-        else:
-            yield event.plain_result(f"❌ 激活失败: {msg}")
+            if not persona_id:
+                yield event.plain_result(
+                    "请指定人格ID，例如: /快捷人格 激活人格 qp_猫娘_abc123\n"
+                    "或先使用 /快捷人格 选择人格 选择一个人格"
+                )
+                return
+
+            try:
+                await self.persona_service.get_persona(persona_id)
+            except ValueError:
+                yield event.plain_result(f"❌ 未找到人格: {persona_id}")
+                return
+
+            umo = getattr(event, "unified_msg_origin", None)
+            if not umo:
+                yield event.plain_result("❌ 无法获取会话信息")
+                return
+
+            success, msg = await self.persona_service.activate_persona(umo, persona_id)
+            if success:
+                session.current_persona_id = persona_id
+                yield event.plain_result(f"✅ {msg}\n📌 AI 的下一条回复将使用新人格")
+            else:
+                yield event.plain_result(f"❌ 激活失败: {msg}")
+
+        except Exception as e:
+            logger.error(f"[lzpersona] 激活人格失败: {e}")
+            yield event.plain_result(f"❌ 激活人格失败: {e}")
+        finally:
+            event.stop_event()
 
     @qp.command("新建对话", alias={"newchat"})
     async def cmd_newchat(self, event: AstrMessageEvent, persona_id: str = ""):
@@ -1243,34 +1276,318 @@ class QuickPersona(Star):
     @qp.command("删除人格", alias={"delete"})
     async def cmd_delete(self, event: AstrMessageEvent, persona_id: str = ""):
         """删除人格"""
-        if not persona_id:
-            yield event.plain_result(
-                "请指定人格ID，例如: /快捷人格 删除人格 qp_猫娘_abc123"
-            )
-            return
-
         try:
-            await self.persona_service.get_persona(persona_id)
-        except ValueError:
-            yield event.plain_result(f"❌ 未找到人格: {persona_id}")
-            return
+            if not persona_id:
+                yield event.plain_result(
+                    "请指定人格ID，例如: /快捷人格 删除人格 qp_猫娘_abc123"
+                )
+                return
 
-        # 安全检查：只允许删除本插件创建的人格
-        if not persona_id.startswith(PERSONA_PREFIX):
+            try:
+                await self.persona_service.get_persona(persona_id)
+            except ValueError:
+                yield event.plain_result(f"❌ 未找到人格: {persona_id}")
+                return
+
+            # 安全检查：只允许删除本插件创建的人格
+            if not persona_id.startswith(PERSONA_PREFIX):
+                yield event.plain_result(
+                    f"⚠️ 人格 {persona_id} 不是由本插件创建的\n"
+                    f"如果确定要删除，请在 AstrBot 面板中操作"
+                )
+                return
+
+            success = await self.persona_service.delete_persona(persona_id)
+            if success:
+                # 清理会话中的当前选中
+                session_id = get_session_id(event)
+                session = self.state.get_session(session_id)
+                if session.current_persona_id == persona_id:
+                    session.current_persona_id = None
+
+                yield event.plain_result(f"✅ 已删除人格: {persona_id}")
+            else:
+                yield event.plain_result("❌ 删除失败，请查看日志")
+
+        except Exception as e:
+            logger.error(f"[lzpersona] 删除人格失败: {e}")
+            yield event.plain_result(f"❌ 删除人格失败: {e}")
+        finally:
+            event.stop_event()
+
+    # ==================== 用户画像功能 ====================
+
+    def _get_profile_enabled(self) -> bool:
+        """是否启用用户画像功能"""
+        return bool(self._get_cfg("profile_enabled", False))
+
+    @filter.on_decorating_result()
+    async def on_message_for_profile(self, event: AstrMessageEvent):
+        """监听消息用于用户画像更新（静默运行，使用钩子装饰器）"""
+        if not self._get_profile_enabled():
+            return
+        
+        # 提取消息文本
+        message_text = ""
+        for comp in event.message_obj.message:
+            if isinstance(comp, Plain):
+                message_text += comp.text
+        
+        if not message_text.strip():
+            return
+        
+        # 获取发送者信息
+        sender_id = str(event.get_sender_id() or "")
+        sender_name = event.get_sender_name() or ""
+        
+        # 获取群ID（如果是群聊）
+        group_id = ""
+        umo = getattr(event, "unified_msg_origin", "")
+        if ":group:" in umo:
+            parts = umo.split(":")
+            if len(parts) >= 3:
+                group_id = parts[2]
+        
+        # 处理消息（静默，不产生任何输出）
+        try:
+            await self.profile_service.process_message(
+                user_id=sender_id,
+                content=message_text.strip(),
+                group_id=group_id,
+                nickname=sender_name,
+                event=event,
+            )
+        except Exception as e:
+            logger.debug(f"[lzpersona] 画像消息处理失败: {e}")
+
+    # ==================== 画像命令组 ====================
+
+    @filter.command_group("画像", alias={"profile", "pf"})
+    def profile_cmd(self):
+        """用户画像命令组"""
+        pass
+
+    @profile_cmd.command("帮助", alias={"help", "?"})
+    async def profile_help(self, event: AstrMessageEvent):
+        """显示画像功能帮助"""
+        help_text = """👤 用户画像功能 - 命令列表
+
+📡 监控管理
+/画像 添加监控 <用户ID> [模式] - 添加用户画像监控
+  模式: global(全局) 或 group(仅当前群)
+/画像 移除监控 <用户ID> - 移除画像监控
+/画像 监控列表 - 查看所有监控配置
+
+📊 画像查看
+/画像 查看 <用户ID> - 查看用户画像
+/画像 列表 - 查看所有画像
+
+🔧 管理操作
+/画像 强制更新 <用户ID> - 立即更新画像
+/画像 删除 <用户ID> - 删除用户画像
+/画像 缓冲状态 <用户ID> - 查看消息缓冲区状态
+
+💡 说明：
+- 添加监控后，系统会自动收集目标用户的消息
+- 累积一定消息后自动调用 LLM 生成/更新画像
+- 画像数据持久化存储，重启不丢失"""
+        yield event.plain_result(help_text)
+
+    @profile_cmd.command("添加监控", alias={"add", "monitor"})
+    async def profile_add_monitor(self, event: AstrMessageEvent, user_id: str = "", mode: str = "global"):
+        """添加用户画像监控"""
+        if not user_id:
             yield event.plain_result(
-                f"⚠️ 人格 {persona_id} 不是由本插件创建的\n"
-                f"如果确定要删除，请在 AstrBot 面板中操作"
+                "请指定用户ID，例如：/画像 添加监控 123456789\n"
+                "可选模式: global(全局) 或 group(仅当前群)"
             )
             return
-
-        success = await self.persona_service.delete_persona(persona_id)
-        if success:
-            # 清理会话中的当前选中
-            session_id = get_session_id(event)
-            session = self.state.get_session(session_id)
-            if session.current_persona_id == persona_id:
-                session.current_persona_id = None
-
-            yield event.plain_result(f"✅ 已删除人格: {persona_id}")
+        
+        # 解析模式
+        if mode.lower() in ["group", "群聊", "群"]:
+            profile_mode = ProfileMode.GROUP
+            # 获取当前群ID
+            umo = getattr(event, "unified_msg_origin", "")
+            group_ids = []
+            if ":group:" in umo:
+                parts = umo.split(":")
+                if len(parts) >= 3:
+                    group_ids = [parts[2]]
+            
+            if not group_ids:
+                yield event.plain_result("❌ 群聊模式需要在群聊中使用")
+                return
         else:
-            yield event.plain_result("❌ 删除失败，请查看日志")
+            profile_mode = ProfileMode.GLOBAL
+            group_ids = []
+        
+        creator_id = str(event.get_sender_id() or "")
+        
+        try:
+            monitor = await self.profile_service.add_monitor(
+                user_id=user_id,
+                mode=profile_mode,
+                group_ids=group_ids,
+                created_by=creator_id,
+            )
+            
+            mode_text = "全局模式" if profile_mode == ProfileMode.GLOBAL else f"群聊模式 (群: {', '.join(group_ids)})"
+            yield event.plain_result(
+                f"✅ 已添加画像监控\n"
+                f"👤 用户ID: {user_id}\n"
+                f"📡 模式: {mode_text}\n"
+                f"💡 系统将自动收集该用户的消息并生成画像"
+            )
+        except Exception as e:
+            logger.error(f"[lzpersona] 添加监控失败: {e}")
+            yield event.plain_result(f"❌ 添加失败: {e}")
+
+    @profile_cmd.command("移除监控", alias={"remove", "rm"})
+    async def profile_remove_monitor(self, event: AstrMessageEvent, user_id: str = ""):
+        """移除画像监控"""
+        if not user_id:
+            yield event.plain_result("请指定用户ID，例如：/画像 移除监控 123456789")
+            return
+        
+        success = await self.profile_service.remove_monitor(user_id)
+        if success:
+            yield event.plain_result(f"✅ 已移除对用户 {user_id} 的监控")
+        else:
+            yield event.plain_result(f"❌ 未找到用户 {user_id} 的监控配置")
+
+    @profile_cmd.command("监控列表", alias={"monitors"})
+    async def profile_list_monitors(self, event: AstrMessageEvent):
+        """查看所有监控配置"""
+        monitors = await self.profile_service.get_all_monitors()
+        
+        if not monitors:
+            yield event.plain_result("当前没有任何画像监控")
+            return
+        
+        lines = ["📡 画像监控列表", "-" * 30]
+        for m in monitors:
+            mode_text = "🌐全局" if m.mode == ProfileMode.GLOBAL else f"👥群聊({', '.join(m.group_ids[:2])})"
+            status = "✅启用" if m.enabled else "⏸️暂停"
+            lines.append(f"• {m.user_id} | {mode_text} | {status}")
+        
+        lines.append("-" * 30)
+        lines.append(f"共 {len(monitors)} 个监控")
+        yield event.plain_result("\n".join(lines))
+
+    @profile_cmd.command("查看", alias={"view", "show"})
+    async def profile_view(self, event: AstrMessageEvent, user_id: str = ""):
+        """查看用户画像"""
+        if not user_id:
+            yield event.plain_result("请指定用户ID，例如：/画像 查看 123456789")
+            return
+        
+        profile = await self.profile_service.get_profile(user_id)
+        if not profile:
+            yield event.plain_result(f"❌ 未找到用户 {user_id} 的画像")
+            return
+        
+        # 渲染画像卡片
+        try:
+            last_updated = datetime.fromtimestamp(profile.last_updated).strftime("%Y-%m-%d %H:%M") if profile.last_updated else "从未"
+            
+            image_url = await self.html_render(
+                PROFILE_CARD_TEMPLATE,
+                {
+                    "avatar_emoji": "👤",
+                    "nickname": profile.nickname or "未知",
+                    "user_id": profile.user_id,
+                    "profile_text": profile.profile_text or "暂无画像描述",
+                    "traits": profile.traits,
+                    "interests": profile.interests,
+                    "speaking_style": profile.speaking_style,
+                    "emotional_tendency": profile.emotional_tendency,
+                    "message_count": profile.message_count,
+                    "last_updated": last_updated,
+                },
+                options={"full_page": True}
+            )
+            yield event.image_result(image_url)
+        except Exception as e:
+            logger.warning(f"[lzpersona] 画像卡片渲染失败: {e}")
+            # 降级为纯文本
+            lines = [
+                f"👤 用户画像: {profile.nickname or user_id}",
+                "-" * 30,
+                f"📝 画像描述: {profile.profile_text or '暂无'}",
+                f"🏷️ 性格特征: {', '.join(profile.traits) if profile.traits else '暂无'}",
+                f"💡 兴趣爱好: {', '.join(profile.interests) if profile.interests else '暂无'}",
+                f"💬 说话风格: {profile.speaking_style or '暂无'}",
+                f"❤️ 情感倾向: {profile.emotional_tendency or '暂无'}",
+                "-" * 30,
+                f"📊 已分析消息: {profile.message_count} 条",
+            ]
+            yield event.plain_result("\n".join(lines))
+
+    @profile_cmd.command("列表", alias={"list", "ls"})
+    async def profile_list(self, event: AstrMessageEvent):
+        """查看所有画像"""
+        profiles = await self.profile_service.get_all_profiles()
+        
+        if not profiles:
+            yield event.plain_result("当前没有任何用户画像")
+            return
+        
+        lines = ["👥 用户画像列表", "-" * 30]
+        for p in profiles:
+            name = p.nickname or p.user_id
+            preview = shorten_prompt(p.profile_text, 30) if p.profile_text else "暂无描述"
+            lines.append(f"• {name}: {preview}")
+        
+        lines.append("-" * 30)
+        lines.append(f"共 {len(profiles)} 个画像")
+        yield event.plain_result("\n".join(lines))
+
+    @profile_cmd.command("强制更新", alias={"update", "refresh"})
+    async def profile_force_update(self, event: AstrMessageEvent, user_id: str = ""):
+        """强制更新画像"""
+        if not user_id:
+            yield event.plain_result("请指定用户ID，例如：/画像 强制更新 123456789")
+            return
+        
+        buffer_status = await self.profile_service.get_buffer_status(user_id)
+        if buffer_status["message_count"] == 0:
+            yield event.plain_result(f"❌ 用户 {user_id} 的消息缓冲区为空，无法更新")
+            return
+        
+        yield event.plain_result(
+            f"🔄 正在更新用户 {user_id} 的画像...\n"
+            f"📝 待处理消息: {buffer_status['message_count']} 条"
+        )
+        
+        success = await self.profile_service.force_update(user_id, event)
+        if success:
+            yield event.plain_result(f"✅ 画像已更新！使用 /画像 查看 {user_id} 查看结果")
+        else:
+            yield event.plain_result("❌ 更新失败，请查看日志")
+
+    @profile_cmd.command("删除", alias={"delete", "del"})
+    async def profile_delete(self, event: AstrMessageEvent, user_id: str = ""):
+        """删除用户画像"""
+        if not user_id:
+            yield event.plain_result("请指定用户ID，例如：/画像 删除 123456789")
+            return
+        
+        success = await self.profile_service.delete_profile(user_id)
+        if success:
+            yield event.plain_result(f"✅ 已删除用户 {user_id} 的画像和监控配置")
+        else:
+            yield event.plain_result(f"❌ 未找到用户 {user_id} 的画像")
+
+    @profile_cmd.command("缓冲状态", alias={"buffer"})
+    async def profile_buffer_status(self, event: AstrMessageEvent, user_id: str = ""):
+        """查看消息缓冲区状态"""
+        if not user_id:
+            yield event.plain_result("请指定用户ID，例如：/画像 缓冲状态 123456789")
+            return
+        
+        status = await self.profile_service.get_buffer_status(user_id)
+        yield event.plain_result(
+            f"📦 用户 {user_id} 的缓冲区状态\n"
+            f"📝 待处理消息: {status['message_count']} 条\n"
+            f"⏰ 上次更新: {status['last_flush'] or '从未'}"
+        )

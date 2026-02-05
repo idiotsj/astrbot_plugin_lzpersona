@@ -2,5 +2,6 @@
 
 from .persona import PersonaService
 from .llm import LLMService
+from .profile import ProfileService
 
-__all__ = ["PersonaService", "LLMService"]
+__all__ = ["PersonaService", "LLMService", "ProfileService"]
