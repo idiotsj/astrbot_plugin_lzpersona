@@ -128,6 +128,16 @@ class QuickPersonaState:
         # 实际的备份写入在 add_backup 中完成
         pass
 
+    async def save_async(self) -> None:
+        """异步保存状态（用于插件卸载时的清理）
+        
+        由于备份数据是实时写入文件的，此方法主要用于确保一致性
+        """
+        async with self._save_lock:
+            # 备份数据已经实时保存到文件系统，无需额外操作
+            # 会话数据是运行时状态，不需要持久化
+            logger.debug("[lzpersona] 状态保存完成")
+
     def get_session(self, session_id: str) -> SessionData:
         """获取会话数据"""
         if session_id not in self.sessions:

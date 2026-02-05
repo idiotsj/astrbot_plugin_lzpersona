@@ -148,7 +148,7 @@ PERSONA_CARD_TEMPLATE = """
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.2", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.3", ""
 )
 class QuickPersona(Star):
     """快捷人格生成器插件
@@ -776,70 +776,82 @@ class QuickPersona(Star):
     @qp.command("确认应用", alias={"apply", "yes"})
     async def cmd_apply(self, event: AstrMessageEvent):
         """应用待确认的人格"""
-        session_id = get_session_id(event)
-        session = self.state.get_session(session_id)
+        try:
+            session_id = get_session_id(event)
+            session = self.state.get_session(session_id)
 
-        if session.state != SessionState.WAITING_CONFIRM or not session.pending_persona:
-            yield event.plain_result("没有待确认的人格")
-            return
+            if session.state != SessionState.WAITING_CONFIRM or not session.pending_persona:
+                yield event.plain_result("没有待确认的人格")
+                return
 
-        pending = session.pending_persona
-        # 获取用户名用于占位符替换
-        user_name = event.get_sender_name() or "User"
-        success = await self.persona_service.create_or_update(
-            pending.persona_id, pending.system_prompt, backup=True, user_name=user_name
-        )
-
-        if success:
-            session.current_persona_id = pending.persona_id
-            session.state = SessionState.IDLE
-            session.pending_persona = None
-
-            yield event.plain_result(
-                f"✅ 人格已应用！\n"
-                f"📌 人格ID: {pending.persona_id}\n"
-                f"💡 使用 /快捷人格 激活人格 让 AI 使用此人格"
+            pending = session.pending_persona
+            # 获取用户名用于占位符替换
+            user_name = event.get_sender_name() or "User"
+            success = await self.persona_service.create_or_update(
+                pending.persona_id, pending.system_prompt, backup=True, user_name=user_name
             )
-        else:
-            yield event.plain_result("❌ 应用失败，请查看日志")
+
+            if success:
+                session.current_persona_id = pending.persona_id
+                session.state = SessionState.IDLE
+                session.pending_persona = None
+
+                yield event.plain_result(
+                    f"✅ 人格已应用！\n"
+                    f"📌 人格ID: {pending.persona_id}\n"
+                    f"💡 使用 /快捷人格 激活人格 让 AI 使用此人格"
+                )
+            else:
+                yield event.plain_result("❌ 应用失败，请查看日志")
+        except Exception as e:
+            logger.error(f"[lzpersona] 应用人格失败: {e}")
+            yield event.plain_result(f"❌ 应用人格失败: {e}")
+        finally:
+            event.stop_event()
 
     @qp.command("取消操作", alias={"cancel", "no"})
     async def cmd_cancel(self, event: AstrMessageEvent):
         """取消待确认的人格"""
-        session_id = get_session_id(event)
-        session = self.state.get_session(session_id)
+        try:
+            session_id = get_session_id(event)
+            session = self.state.get_session(session_id)
 
-        if session.state != SessionState.WAITING_CONFIRM:
-            yield event.plain_result("没有待确认的人格")
-            return
+            if session.state != SessionState.WAITING_CONFIRM:
+                yield event.plain_result("没有待确认的人格")
+                return
 
-        session.state = SessionState.IDLE
-        session.pending_persona = None
-        yield event.plain_result("✅ 已取消")
+            session.state = SessionState.IDLE
+            session.pending_persona = None
+            yield event.plain_result("✅ 已取消")
+        finally:
+            event.stop_event()
 
     @qp.command("查看状态", alias={"status"})
     async def cmd_status(self, event: AstrMessageEvent):
         """查看当前状态"""
-        session_id = get_session_id(event)
-        session = self.state.get_session(session_id)
+        try:
+            session_id = get_session_id(event)
+            session = self.state.get_session(session_id)
 
-        lines = ["📊 当前状态"]
-        lines.append(f"会话状态: {session.state.value}")
+            lines = ["📊 当前状态"]
+            lines.append(f"会话状态: {session.state.value}")
 
-        if session.current_persona_id:
-            lines.append(f"当前人格: {session.current_persona_id}")
+            if session.current_persona_id:
+                lines.append(f"当前人格: {session.current_persona_id}")
 
-        if session.pending_persona:
-            p = session.pending_persona
-            lines.append("\n📌 待确认人格:")
-            lines.append(f"  ID: {p.persona_id}")
-            lines.append(f"  模式: {p.mode}")
-            lines.append(
-                f"  创建于: {datetime.fromtimestamp(p.created_at).strftime('%H:%M:%S')}"
-            )
-            lines.append(f"  提示词预览: {shorten_prompt(p.system_prompt, 100)}")
+            if session.pending_persona:
+                p = session.pending_persona
+                lines.append("\n📌 待确认人格:")
+                lines.append(f"  ID: {p.persona_id}")
+                lines.append(f"  模式: {p.mode}")
+                lines.append(
+                    f"  创建于: {datetime.fromtimestamp(p.created_at).strftime('%H:%M:%S')}"
+                )
+                lines.append(f"  提示词预览: {shorten_prompt(p.system_prompt, 100)}")
 
-        yield event.plain_result("\n".join(lines))
+            yield event.plain_result("\n".join(lines))
+        finally:
+            event.stop_event()
 
     @qp.command("人格列表", alias={"list", "ls"})
     async def cmd_list(self, event: AstrMessageEvent):
@@ -1321,11 +1333,15 @@ class QuickPersona(Star):
         """是否启用用户画像功能"""
         return bool(self._get_cfg("profile_enabled", False))
 
-    @filter.on_decorating_result()
+    @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message_for_profile(self, event: AstrMessageEvent):
-        """监听消息用于用户画像更新（静默运行，使用钩子装饰器）"""
+        """监听所有消息用于用户画像更新（静默运行，不阻止事件传播）
+        
+        使用 event_message_type 过滤器监听所有类型的消息事件，
+        这样可以在消息到达时就进行处理，而不是等到 LLM 响应后。
+        """
         if not self._get_profile_enabled():
-            return
+            return  # 不调用 stop_event()，让事件继续传播
         
         # 提取消息文本
         message_text = ""
@@ -1334,7 +1350,7 @@ class QuickPersona(Star):
                 message_text += comp.text
         
         if not message_text.strip():
-            return
+            return  # 不调用 stop_event()，让事件继续传播
         
         # 获取发送者信息
         sender_id = str(event.get_sender_id() or "")
@@ -1348,7 +1364,7 @@ class QuickPersona(Star):
             if len(parts) >= 3:
                 group_id = parts[2]
         
-        # 处理消息（静默，不产生任何输出）
+        # 处理消息（静默，不产生任何输出，不阻止事件传播）
         try:
             await self.profile_service.process_message(
                 user_id=sender_id,
@@ -1359,6 +1375,8 @@ class QuickPersona(Star):
             )
         except Exception as e:
             logger.debug(f"[lzpersona] 画像消息处理失败: {e}")
+        
+        # 注意：不调用 event.stop_event()，让事件继续传播到其他处理器
 
     # ==================== 画像命令组 ====================
 
