@@ -136,10 +136,22 @@ class ProfileCommands:
             yield event.plain_result(f"❌ 未找到用户 {user_id} 的画像")
             return
         
-        # 渲染画像卡片
+        # 准备纯文本备用输出
+        last_updated = datetime.fromtimestamp(profile.last_updated).strftime("%Y-%m-%d %H:%M") if profile.last_updated else "从未"
+        text_lines = [
+            f"👤 用户画像: {profile.nickname or user_id}",
+            "-" * 30,
+            f"📝 画像描述: {profile.profile_text or '暂无'}",
+            f"🏷️ 性格特征: {', '.join(profile.traits) if profile.traits else '暂无'}",
+            f"💡 兴趣爱好: {', '.join(profile.interests) if profile.interests else '暂无'}",
+            f"💬 说话风格: {profile.speaking_style or '暂无'}",
+            f"❤️ 情感倾向: {profile.emotional_tendency or '暂无'}",
+            "-" * 30,
+            f"📊 已分析消息: {profile.message_count} 条",
+        ]
+        
+        # 尝试渲染画像卡片
         try:
-            last_updated = datetime.fromtimestamp(profile.last_updated).strftime("%Y-%m-%d %H:%M") if profile.last_updated else "从未"
-            
             image_url = await self.html_render(
                 PROFILE_CARD_TEMPLATE,
                 {
@@ -156,22 +168,16 @@ class ProfileCommands:
                 },
                 options={"full_page": True}
             )
-            yield event.image_result(image_url)
+            # 验证渲染结果
+            if image_url:
+                yield event.image_result(image_url)
+            else:
+                logger.warning("[lzpersona] 画像卡片渲染返回空值")
+                yield event.plain_result("\n".join(text_lines))
         except Exception as e:
             logger.warning(f"[lzpersona] 画像卡片渲染失败: {e}")
             # 降级为纯文本
-            lines = [
-                f"👤 用户画像: {profile.nickname or user_id}",
-                "-" * 30,
-                f"📝 画像描述: {profile.profile_text or '暂无'}",
-                f"🏷️ 性格特征: {', '.join(profile.traits) if profile.traits else '暂无'}",
-                f"💡 兴趣爱好: {', '.join(profile.interests) if profile.interests else '暂无'}",
-                f"💬 说话风格: {profile.speaking_style or '暂无'}",
-                f"❤️ 情感倾向: {profile.emotional_tendency or '暂无'}",
-                "-" * 30,
-                f"📊 已分析消息: {profile.message_count} 条",
-            ]
-            yield event.plain_result("\n".join(lines))
+            yield event.plain_result("\n".join(text_lines))
 
     async def profile_list(self: "QuickPersona", event: AstrMessageEvent):
         """查看所有画像"""

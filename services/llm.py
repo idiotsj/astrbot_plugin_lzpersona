@@ -26,6 +26,41 @@ if TYPE_CHECKING:
     from astrbot.api.star import Context
 
 
+def _extract_json_object(text: str) -> Optional[dict]:
+    """从文本中提取完整的 JSON 对象（支持嵌套）
+    
+    Args:
+        text: 可能包含 JSON 的文本
+        
+    Returns:
+        解析后的字典，失败返回 None
+    """
+    # 先尝试直接解析整个文本
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+    
+    # 查找第一个 { 并匹配完整的 JSON 对象
+    start = text.find('{')
+    if start == -1:
+        return None
+    
+    brace_count = 0
+    for i in range(start, len(text)):
+        if text[i] == '{':
+            brace_count += 1
+        elif text[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                try:
+                    return json.loads(text[start:i+1])
+                except json.JSONDecodeError:
+                    return None
+    
+    return None
+
+
 class LLMService:
     """LLM 调用封装"""
 
@@ -127,30 +162,24 @@ class LLMService:
         if not result:
             return {"action": "help", "error": "LLM 调用失败"}
 
-        # 解析 JSON
-        try:
-            # 尝试提取 JSON 部分
-            json_match = re.search(r'\{[^{}]*\}', result, re.DOTALL)
-            if json_match:
-                intent = json.loads(json_match.group())
-            else:
-                intent = json.loads(result)
-
-            # 确保有 action 字段
-            if "action" not in intent:
-                intent["action"] = "help"
-
-            # 清理空字段
-            for key in ["description", "feedback", "persona_id", "intensity"]:
-                if key not in intent:
-                    intent[key] = ""
-
-            return intent
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"[lzpersona] 意图解析失败: {e}, 原文: {result}")
+        # 解析 JSON（使用支持嵌套的提取方法）
+        intent = _extract_json_object(result)
+        
+        if intent is None:
+            logger.warning(f"[lzpersona] 意图解析失败, 原文: {result}")
             # 尝试简单的关键词匹配作为降级方案
             return self._fallback_intent_match(query)
+
+        # 确保有 action 字段
+        if "action" not in intent:
+            intent["action"] = "help"
+
+        # 清理空字段
+        for key in ["description", "feedback", "persona_id", "intensity"]:
+            if key not in intent:
+                intent[key] = ""
+
+        return intent
 
     async def analyze_missing_fields(
         self, description: str, event: "AstrMessageEvent"
@@ -174,25 +203,19 @@ class LLMService:
             logger.warning("[lzpersona] 缺失字段分析失败，返回默认结果")
             return self._get_default_missing_fields()
 
-        try:
-            # 尝试提取 JSON 部分
-            json_match = re.search(r'\{[^{}]*"provided"[^{}]*"missing"[^{}]*\}', result, re.DOTALL)
-            if json_match:
-                analysis = json.loads(json_match.group())
-            else:
-                # 尝试直接解析
-                analysis = json.loads(result)
-
-            # 验证结构
-            if "provided" not in analysis or "missing" not in analysis:
-                logger.warning("[lzpersona] 分析结果缺少必要字段")
-                return self._get_default_missing_fields()
-
-            return analysis
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"[lzpersona] 缺失字段分析 JSON 解析失败: {e}")
+        # 使用支持嵌套的 JSON 提取方法
+        analysis = _extract_json_object(result)
+        
+        if analysis is None:
+            logger.warning(f"[lzpersona] 缺失字段分析 JSON 解析失败")
             return self._get_default_missing_fields()
+
+        # 验证结构
+        if "provided" not in analysis or "missing" not in analysis:
+            logger.warning("[lzpersona] 分析结果缺少必要字段")
+            return self._get_default_missing_fields()
+
+        return analysis
 
     def _get_default_missing_fields(self) -> dict:
         """返回默认的缺失字段列表"""

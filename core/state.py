@@ -79,6 +79,8 @@ class QuickPersonaState:
         if not os.path.exists(self.backups_dir):
             return
 
+        total_skipped = 0  # 统计跳过的文件总数
+        
         try:
             # 遍历备份目录下的所有人格文件夹
             for persona_dir_name in os.listdir(self.backups_dir):
@@ -87,12 +89,15 @@ class QuickPersonaState:
                     continue
 
                 backups = []
+                skipped_files = 0  # 当前人格跳过的文件数
+                
                 for filename in os.listdir(persona_dir):
                     if not filename.endswith(".txt"):
                         continue
 
                     parsed = self._parse_backup_filename(filename)
                     if not parsed:
+                        skipped_files += 1
                         continue
 
                     version, timestamp = parsed
@@ -110,15 +115,28 @@ class QuickPersonaState:
                             )
                         )
                     except Exception as e:
+                        skipped_files += 1
                         logger.warning(
                             f"[lzpersona] 读取备份文件失败 {filepath}: {e}"
                         )
+
+                # 汇总跳过的文件
+                if skipped_files > 0:
+                    total_skipped += skipped_files
+                    logger.warning(
+                        f"[lzpersona] 人格 {persona_dir_name} 有 {skipped_files} 个备份文件无法加载"
+                    )
 
                 # 按时间戳降序排列（最新的在前）
                 backups.sort(key=lambda b: b.backed_up_at, reverse=True)
                 if backups:
                     self.backups[persona_dir_name] = backups
 
+            # 日志汇总
+            if total_skipped > 0:
+                logger.warning(
+                    f"[lzpersona] 共有 {total_skipped} 个备份文件无法加载，数据可能不完整"
+                )
             logger.info(f"[lzpersona] 已加载 {len(self.backups)} 个人格的备份数据")
 
         except Exception as e:

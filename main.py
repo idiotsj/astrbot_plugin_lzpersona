@@ -56,9 +56,8 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
         super().__init__(context)
         self.context = context
 
-        # 初始化数据目录
-        base_data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME)).parent.parent
-        self.data_dir = base_data_dir / "plugin_data" / PLUGIN_DATA_NAME
+        # 初始化数据目录（直接使用 StarTools 返回的规范路径）
+        self.data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # 初始化状态管理

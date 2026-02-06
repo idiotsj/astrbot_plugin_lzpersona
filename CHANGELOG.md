@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-02-06
+
+### 修复
+- 🐛 **数据持久化路径修复** - 直接使用 `StarTools.get_data_dir()` 返回的规范路径，不再手动操作父目录
+- 🐛 **JSON 解析健壮性** - 新增 `_extract_json_object()` 函数支持嵌套 JSON 对象提取，替代简单正则表达式
+- 🐛 **HTML 渲染返回值验证** - 画像卡片渲染增加空值检查，失败时降级为纯文本输出
+- 🐛 **备份文件容错处理** - 加载备份时统计并汇总跳过的损坏文件数量，提醒数据完整性问题
+
+---
+
 ## [2.0.0] - 2026-02-06
 
 ### 🎉 重大更新
