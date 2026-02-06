@@ -42,7 +42,7 @@ from .utils import shorten_prompt, generate_persona_id, get_session_id
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.2.0", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.0.0", ""
 )
 class QuickPersona(Star, PersonaCommands, ProfileCommands):
     """快捷人格生成器插件
@@ -79,6 +79,14 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
         self.render = self.render_service
 
         logger.info(f"[lzpersona] 插件初始化完成，数据目录: {self.data_dir}")
+
+    async def initialize(self):
+        """异步初始化方法 - 用于加载需要异步操作的数据"""
+        try:
+            await self.profile_service.load()
+            logger.info("[lzpersona] 异步初始化完成")
+        except Exception as e:
+            logger.error(f"[lzpersona] 异步初始化失败: {e}")
 
     async def terminate(self):
         """插件卸载时的清理方法"""
