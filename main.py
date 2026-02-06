@@ -298,7 +298,8 @@ class QuickPersona(Star):
     @qp.command("使用帮助", alias={"help", "?"})
     async def cmd_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
-        help_text = """快捷人格生成器 - 命令列表
+        try:
+            help_text = """快捷人格生成器 - 命令列表
 
 🤖 智能入口（推荐）
 /人格 <自然语言> - 智能识别意图，自动执行
@@ -323,7 +324,9 @@ class QuickPersona(Star):
   /人格 让她更傲娇一点    → 直接优化未生成的人格
   /人格 确认              → 满意后保存人格
   /人格 应用              → 让AI使用此人格"""
-        yield event.plain_result(help_text)
+            yield event.plain_result(help_text)
+        finally:
+            event.stop_event()
 
     # ==================== 智能入口 ====================
 
@@ -425,6 +428,8 @@ class QuickPersona(Star):
         else:
             async for r in self.cmd_help(event):
                 yield r
+        
+        event.stop_event()
 
     def _get_enable_guided_generation(self) -> bool:
         """是否启用引导式生成"""
