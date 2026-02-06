@@ -148,7 +148,7 @@ PERSONA_CARD_TEMPLATE = """
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.4", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.5", ""
 )
 class QuickPersona(Star):
     """快捷人格生成器插件
@@ -426,14 +426,29 @@ class QuickPersona(Star):
         # 直接从原始消息中提取描述，避免命令解析器截断问题
         raw_message = event.get_message_str().strip()
         
-        # 定义可能的命令前缀组合
+        # 定义可能的命令前缀组合（包括换行符版本）
         prefixes = [
+            # 同一行带空格
             "/快捷人格 生成人格 ", "快捷人格 生成人格 ",
             "/qp 生成人格 ", "qp 生成人格 ",
             "/quickpersona 生成人格 ", "quickpersona 生成人格 ",
             "/快捷人格 gen ", "快捷人格 gen ",
             "/qp gen ", "qp gen ",
             "/quickpersona gen ", "quickpersona gen ",
+            # 换行版本（命令后直接换行）
+            "/快捷人格 生成人格\n", "快捷人格 生成人格\n",
+            "/qp 生成人格\n", "qp 生成人格\n",
+            "/quickpersona 生成人格\n", "quickpersona 生成人格\n",
+            "/快捷人格 gen\n", "快捷人格 gen\n",
+            "/qp gen\n", "qp gen\n",
+            "/quickpersona gen\n", "quickpersona gen\n",
+            # 无参数版本（仅命令）
+            "/快捷人格 生成人格", "快捷人格 生成人格",
+            "/qp 生成人格", "qp 生成人格",
+            "/quickpersona 生成人格", "quickpersona 生成人格",
+            "/快捷人格 gen", "快捷人格 gen",
+            "/qp gen", "qp gen",
+            "/quickpersona gen", "quickpersona gen",
         ]
         
         # 尝试从原始消息中提取描述部分
@@ -448,6 +463,10 @@ class QuickPersona(Star):
         if not extracted:
             # 如果没有匹配到前缀，使用解析器的结果
             description = str(description).strip()
+        
+        # 调试日志：记录提取的描述
+        logger.debug(f"[lzpersona] 原始消息长度: {len(raw_message)}, 提取的描述长度: {len(description)}")
+        logger.debug(f"[lzpersona] 提取的描述: {description[:200]}..." if len(description) > 200 else f"[lzpersona] 提取的描述: {description}")
 
         if not description:
             yield event.plain_result(
