@@ -40,6 +40,8 @@ class QuickPersonaState:
         self.backups: dict[str, list[PersonaBackup]] = {}
 
         self._save_lock = asyncio.Lock()
+        # 会话级别锁，防止同一会话的并发操作
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
         # 确保备份目录存在
         os.makedirs(self.backups_dir, exist_ok=True)
@@ -143,6 +145,24 @@ class QuickPersonaState:
         if session_id not in self.sessions:
             self.sessions[session_id] = SessionData()
         return self.sessions[session_id]
+
+    def get_session_lock(self, session_id: str) -> asyncio.Lock:
+        """获取会话级别锁，用于防止同一会话的并发操作"""
+        if session_id not in self._session_locks:
+            self._session_locks[session_id] = asyncio.Lock()
+        return self._session_locks[session_id]
+
+    async def acquire_session(self, session_id: str) -> tuple[SessionData, asyncio.Lock]:
+        """获取会话数据并锁定，返回 (session, lock)
+        
+        使用方式:
+            session, lock = await state.acquire_session(session_id)
+            async with lock:
+                # 操作 session
+        """
+        session = self.get_session(session_id)
+        lock = self.get_session_lock(session_id)
+        return session, lock
 
     def add_backup(
         self, persona_id: str, system_prompt: str, max_versions: int = 5
