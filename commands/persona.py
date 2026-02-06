@@ -813,7 +813,8 @@ class PersonaCommands:
                 yield event.plain_result(f"❌ 未找到人格: {persona_id}")
                 return
 
-            umo = getattr(event, "unified_msg_origin", None)
+            # 使用属性访问 unified_msg_origin（推荐方式）
+            umo = event.unified_msg_origin
             if not umo:
                 yield event.plain_result("❌ 无法获取会话信息")
                 return
@@ -918,7 +919,8 @@ class PersonaCommands:
         if not persona_id:
             persona_id = session.current_persona_id or ""
 
-        umo = getattr(event, "unified_msg_origin", None)
+        # 使用属性访问 unified_msg_origin（推荐方式）
+        umo = event.unified_msg_origin
         if not umo:
             yield event.plain_result("❌ 无法获取会话信息")
             return

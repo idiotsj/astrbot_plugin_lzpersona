@@ -190,7 +190,9 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
         sender_id = str(event.get_sender_id() or "")
         sender_name = event.get_sender_name() or ""
         group_id = ""
-        umo = getattr(event, "unified_msg_origin", "")
+        
+        # 使用属性访问 unified_msg_origin（推荐方式）
+        umo = event.unified_msg_origin or ""
         if ":group:" in umo:
             parts = umo.split(":")
             if len(parts) >= 3:

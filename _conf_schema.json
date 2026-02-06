@@ -14,7 +14,8 @@
     "type": "string",
     "description": "默认人格提示词格式",
     "default": "natural",
-    "hint": "可选: natural(自然语言), markdown(MD), xml, json, yaml。不同格式适合不同模型"
+    "options": ["natural", "markdown", "xml", "json", "yaml"],
+    "hint": "不同格式适合不同模型。natural 适合大多数模型，xml/json 适合结构化推理模型"
   },
   "architect_provider_id": {
     "type": "string",
@@ -54,22 +55,22 @@
     "hint": "调用 LLM 生成人格的超时时间"
   },
   "persona_gen_template": {
-    "type": "string",
+    "type": "text",
     "description": "生成人格元提示词模板",
     "default": "",
-    "hint": "高级：自定义生成人格时的系统提示词。留空使用默认模板"
+    "hint": "高级：自定义生成人格时的系统提示词。留空使用默认模板。支持多行输入"
   },
   "persona_refine_template": {
-    "type": "string",
+    "type": "text",
     "description": "优化人格元提示词模板", 
     "default": "",
-    "hint": "高级：自定义优化人格时的系统提示词。留空使用默认模板"
+    "hint": "高级：自定义优化人格时的系统提示词。留空使用默认模板。支持多行输入"
   },
   "persona_shrink_template": {
-    "type": "string",
+    "type": "text",
     "description": "瘦身人格元提示词模板",
     "default": "",
-    "hint": "高级：自定义压缩人格时的系统提示词。留空使用默认模板"
+    "hint": "高级：自定义压缩人格时的系统提示词。留空使用默认模板。支持多行输入"
   },
   "profile_enabled": {
     "type": "bool",
