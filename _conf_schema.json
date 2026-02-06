@@ -54,6 +54,12 @@
     "default": 60,
     "hint": "调用 LLM 生成人格的超时时间"
   },
+  "llm_max_retries": {
+    "type": "int",
+    "description": "LLM 调用最大重试次数",
+    "default": 2,
+    "hint": "LLM 调用失败时的最大重试次数，0 表示不重试"
+  },
   "persona_gen_template": {
     "type": "text",
     "description": "生成人格元提示词模板",

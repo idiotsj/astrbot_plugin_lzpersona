@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-02-06
+
+### 改进
+- ⚡ **命令解析重构** - 使用正则表达式替换硬编码命令前缀列表（响应 Linus 评审意见）
+- ⚡ **LLM 调用重试机制** - 新增 `llm_max_retries` 配置项，失败时自动重试（响应 Tony 评审意见）
+
+### 新增配置
+- `llm_max_retries`: LLM 调用最大重试次数（默认 2）
+
+---
+
 ## [2.0.1] - 2026-02-06
 
 ### 修复

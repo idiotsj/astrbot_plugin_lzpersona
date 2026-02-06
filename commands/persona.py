@@ -157,38 +157,22 @@ class PersonaCommands:
         
         event.stop_event()
 
+    # 命令前缀正则表达式：匹配 /快捷人格|/qp|/quickpersona + 空格 + 生成人格|gen + 可选空格或换行
+    _CMD_GEN_PREFIX_RE = re.compile(
+        r'^/?(?:快捷人格|qp|quickpersona)\s+(?:生成人格|gen)[\s\n]*',
+        re.IGNORECASE
+    )
+
     async def cmd_gen(self: "QuickPersona", event: AstrMessageEvent, description: str = ""):
         """根据描述生成人格（支持引导式生成）"""
         # 直接从原始消息中提取描述，避免命令解析器截断问题
         raw_message = event.get_message_str().strip()
         
-        # 定义可能的命令前缀组合
-        prefixes = [
-            "/快捷人格 生成人格 ", "快捷人格 生成人格 ",
-            "/qp 生成人格 ", "qp 生成人格 ",
-            "/quickpersona 生成人格 ", "quickpersona 生成人格 ",
-            "/快捷人格 gen ", "快捷人格 gen ",
-            "/qp gen ", "qp gen ",
-            "/quickpersona gen ", "quickpersona gen ",
-            "/快捷人格 生成人格\n", "快捷人格 生成人格\n",
-            "/qp 生成人格\n", "qp 生成人格\n",
-            "/快捷人格 gen\n", "快捷人格 gen\n",
-            "/qp gen\n", "qp gen\n",
-            "/快捷人格 生成人格", "快捷人格 生成人格",
-            "/qp 生成人格", "qp 生成人格",
-            "/快捷人格 gen", "快捷人格 gen",
-            "/qp gen", "qp gen",
-        ]
-        
-        # 尝试从原始消息中提取描述部分
-        extracted = False
-        for prefix in prefixes:
-            if raw_message.startswith(prefix) or raw_message.lower().startswith(prefix.lower()):
-                description = raw_message[len(prefix):].strip()
-                extracted = True
-                break
-        
-        if not extracted:
+        # 使用正则表达式匹配并去除命令前缀
+        match = self._CMD_GEN_PREFIX_RE.match(raw_message)
+        if match:
+            description = raw_message[match.end():].strip()
+        else:
             description = str(description).strip()
 
         if not description:

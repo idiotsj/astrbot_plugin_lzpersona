@@ -85,10 +85,14 @@ class LLMService:
         """获取架构师超时时间"""
         return int(self._get_cfg("architect_timeout", 60) or 60)
 
+    def _get_max_retries(self) -> int:
+        """获取最大重试次数"""
+        return int(self._get_cfg("llm_max_retries", 2) or 2)
+
     async def call_architect(
         self, prompt: str, event: "AstrMessageEvent"
     ) -> Optional[str]:
-        """调用架构师模型
+        """调用架构师模型（带重试机制）
 
         Args:
             prompt: 提示词
@@ -99,40 +103,50 @@ class LLMService:
         """
         provider_id = self._get_architect_provider_id()
         timeout = self._get_architect_timeout()
+        max_retries = self._get_max_retries()
 
-        try:
-            if provider_id:
-                provider = self.context.get_provider_by_id(provider_id)
-            else:
-                # 使用属性访问 unified_msg_origin（推荐方式）
-                provider = self.context.get_using_provider(
-                    umo=event.unified_msg_origin if event else None
-                )
+        # 获取 Provider
+        if provider_id:
+            provider = self.context.get_provider_by_id(provider_id)
+        else:
+            provider = self.context.get_using_provider(
+                umo=event.unified_msg_origin if event else None
+            )
 
-            if not provider or not hasattr(provider, "text_chat"):
-                logger.error("[lzpersona] 无法获取 LLM Provider")
-                return None
-
-            text_chat = getattr(provider, "text_chat")
-
-            async def _call():
-                return await text_chat(
-                    prompt=prompt,
-                    contexts=[],
-                    image_urls=[],
-                    func_tool=None,
-                    system_prompt="",
-                )
-
-            resp = await asyncio.wait_for(_call(), timeout=timeout)
-            return (resp.completion_text or "").strip()
-
-        except asyncio.TimeoutError:
-            logger.error(f"[lzpersona] LLM 调用超时 ({timeout}s)")
+        if not provider or not hasattr(provider, "text_chat"):
+            logger.error("[lzpersona] 无法获取 LLM Provider")
             return None
-        except Exception as e:
-            logger.error(f"[lzpersona] LLM 调用失败: {e}")
-            return None
+
+        text_chat = getattr(provider, "text_chat")
+
+        async def _call():
+            return await text_chat(
+                prompt=prompt,
+                contexts=[],
+                image_urls=[],
+                func_tool=None,
+                system_prompt="",
+            )
+
+        # 带重试的调用
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await asyncio.wait_for(_call(), timeout=timeout)
+                return (resp.completion_text or "").strip()
+            except asyncio.TimeoutError:
+                last_error = f"超时 ({timeout}s)"
+                if attempt < max_retries:
+                    logger.warning(f"[lzpersona] LLM 调用{last_error}，重试 {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(1)  # 重试前短暂等待
+            except Exception as e:
+                last_error = str(e)
+                if attempt < max_retries:
+                    logger.warning(f"[lzpersona] LLM 调用失败: {e}，重试 {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(1)
+
+        logger.error(f"[lzpersona] LLM 调用最终失败 (重试{max_retries}次): {last_error}")
+        return None
 
     async def recognize_intent(
         self, query: str, context_info: dict, event: "AstrMessageEvent"
