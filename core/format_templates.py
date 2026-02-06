@@ -29,6 +29,20 @@ FORMAT_DISPLAY_NAMES = {
     PromptFormat.YAML: "YAML",
 }
 
+# 格式别名映射（用于解析用户输入）
+FORMAT_ALIASES = {
+    "natural": PromptFormat.NATURAL,
+    "自然语言": PromptFormat.NATURAL,
+    "text": PromptFormat.NATURAL,
+    "txt": PromptFormat.NATURAL,
+    "markdown": PromptFormat.MARKDOWN,
+    "md": PromptFormat.MARKDOWN,
+    "xml": PromptFormat.XML,
+    "json": PromptFormat.JSON,
+    "yaml": PromptFormat.YAML,
+    "yml": PromptFormat.YAML,
+}
+
 
 def parse_format(format_str: str) -> PromptFormat:
     """解析格式字符串为枚举"""

@@ -1426,12 +1426,12 @@ class QuickPersona(Star):
         """是否启用用户画像功能"""
         return bool(self._get_cfg("profile_enabled", False))
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
-    async def on_message_for_profile(self, event: AstrMessageEvent):
+    @filter.on_llm_request()
+    async def on_message_for_profile(self, event: AstrMessageEvent, req):
         """监听所有消息用于用户画像更新（静默运行，不阻止事件传播）
         
-        使用 event_message_type 过滤器监听所有类型的消息事件，
-        这样可以在消息到达时就进行处理，而不是等到 LLM 响应后。
+        使用 on_llm_request 钩子在 LLM 请求前处理消息，
+        这样可以在消息到达时就进行处理。
         """
         if not self._get_profile_enabled():
             return  # 不调用 stop_event()，让事件继续传播
