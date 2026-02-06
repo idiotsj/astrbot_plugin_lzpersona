@@ -74,6 +74,10 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
         self.profile_service = ProfileService(context, self)
         self.render_service = RenderService(self)
 
+        # 为命令模块提供简短别名
+        self.config = self.config_service
+        self.render = self.render_service
+
         logger.info(f"[lzpersona] 插件初始化完成，数据目录: {self.data_dir}")
 
     async def terminate(self):

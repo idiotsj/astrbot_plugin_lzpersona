@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+from ..core import PromptFormat, parse_format
+
 if TYPE_CHECKING:
     from astrbot.api.star import Context
 
@@ -67,6 +69,12 @@ class ConfigService:
     @property
     def profile_enabled(self) -> bool:
         return self.get_bool("profile_enabled", False)
+
+    @property
+    def default_format(self) -> PromptFormat:
+        """获取默认人格提示词格式"""
+        format_str = self.get_str("default_prompt_format", "natural")
+        return parse_format(format_str)
 
     def get_template(self, key: str, default: str) -> str:
         """获取模板，如果用户未自定义则返回默认值"""

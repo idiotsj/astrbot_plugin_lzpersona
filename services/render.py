@@ -89,14 +89,20 @@ PERSONA_CARD_TEMPLATE = '''<!DOCTYPE html>
 class RenderService:
     """渲染服务 - 统一处理图片和卡片渲染"""
 
-    def __init__(self, html_render_func: Callable, text_to_image_func: Callable):
+    def __init__(self, plugin):
         """
         Args:
-            html_render_func: Star.html_render 方法
-            text_to_image_func: Star.text_to_image 方法
+            plugin: 插件实例 (Star 子类)，需要有 html_render 和 text_to_image 方法
         """
-        self._html_render = html_render_func
-        self._text_to_image = text_to_image_func
+        self._plugin = plugin
+
+    @property
+    def _html_render(self):
+        return self._plugin.html_render
+
+    @property
+    def _text_to_image(self):
+        return self._plugin.text_to_image
 
     async def render_persona_card(
         self,
