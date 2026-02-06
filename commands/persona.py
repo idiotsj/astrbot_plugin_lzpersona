@@ -273,6 +273,7 @@ class PersonaCommands:
             session.state = SessionState.IDLE
             session.pending_persona = None
             yield event.plain_result("⏰ 等待超时，已取消生成")
+            event.stop_event()
             return
 
         # 处理用户回复

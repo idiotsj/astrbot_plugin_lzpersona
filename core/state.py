@@ -126,9 +126,37 @@ class QuickPersonaState:
             self.backups = {}
 
     async def save_backups(self) -> None:
-        """保存备份数据到文件系统（此方法现在主要用于触发清理过期备份）"""
-        # 实际的备份写入在 add_backup 中完成
-        pass
+        """同步内存中的备份状态到文件系统（删除不在内存中的文件）"""
+        async with self._save_lock:
+            for persona_id, backups in list(self.backups.items()):
+                backup_dir = self._get_persona_backup_dir(persona_id)
+                if not os.path.exists(backup_dir):
+                    continue
+                
+                # 获取当前文件系统中的文件
+                existing_files = set()
+                for filename in os.listdir(backup_dir):
+                    if self._parse_backup_filename(filename):
+                        existing_files.add(filename)
+                
+                # 获取内存中应保留的文件
+                kept_files = set()
+                for backup in backups:
+                    # 根据时间戳查找对应的文件
+                    for filename in existing_files:
+                        parsed = self._parse_backup_filename(filename)
+                        if parsed and abs(parsed[1] - backup.backed_up_at) < 1:
+                            kept_files.add(filename)
+                            break
+                
+                # 删除多余的文件
+                for filename in existing_files - kept_files:
+                    filepath = os.path.join(backup_dir, filename)
+                    try:
+                        os.remove(filepath)
+                        logger.info(f"[lzpersona] 已同步删除备份文件: {filepath}")
+                    except Exception as e:
+                        logger.warning(f"[lzpersona] 删除备份文件失败 {filepath}: {e}")
 
     async def save_async(self) -> None:
         """异步保存状态（用于插件卸载时的清理）

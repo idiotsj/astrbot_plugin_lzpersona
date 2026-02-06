@@ -278,10 +278,11 @@ class ProfileService:
                 logger.info(f"[lzpersona] 画像已更新: {user_id}, 累计消息: {profile.message_count}")
         except Exception as e:
             logger.error(f"[lzpersona] 更新画像失败: {e}")
-            # 将消息放回缓冲区并保存
-            for msg in messages:
-                buffer.messages.append(msg)
-            await self.save_buffers()  # 修复：恢复后持久化
+            # 将消息放回缓冲区并保存（使用 extend 保持顺序，避免重复）
+            # 注意：只有在缓冲区为空时才放回，防止多次失败导致重复
+            if not buffer.messages:
+                buffer.messages.extend(messages)
+            await self.save_buffers()
 
     def _format_messages(self, messages: List[Dict]) -> str:
         """格式化消息列表为文本"""
@@ -337,10 +338,8 @@ class ProfileService:
         event: "AstrMessageEvent" = None
     ) -> Optional[Dict]:
         """调用 LLM 并解析结果"""
-        from .llm import LLMService
-        
-        llm_service = LLMService(self.context)
-        result = await llm_service.call_architect(prompt, event)
+        # 使用插件已有的 LLMService 实例，避免重复创建
+        result = await self.plugin.llm_service.call_architect(prompt, event)
         
         if not result:
             return None
