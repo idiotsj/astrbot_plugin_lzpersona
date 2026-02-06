@@ -1,7 +1,15 @@
 """服务模块"""
 
-from .persona import PersonaService
+from .config import ConfigService
 from .llm import LLMService
+from .persona import PersonaService
 from .profile import ProfileService
+from .render import RenderService
 
-__all__ = ["PersonaService", "LLMService", "ProfileService"]
+__all__ = [
+    "ConfigService",
+    "LLMService",
+    "PersonaService",
+    "ProfileService",
+    "RenderService",
+]
