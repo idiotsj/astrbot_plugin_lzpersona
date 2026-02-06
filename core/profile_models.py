@@ -95,7 +95,7 @@ class MessageBuffer:
     """消息缓冲区"""
     user_id: str
     messages: List[Dict] = field(default_factory=list)  # 消息列表 [{content, timestamp, group_id, nickname}]
-    last_flush: float = 0                 # 上次刷新时间
+    last_flush: float = field(default_factory=time.time)  # 上次刷新时间（默认为当前时间，避免首次立即触发）
 
     def add_message(self, content: str, group_id: str = "", nickname: str = ""):
         """添加消息到缓冲区"""
@@ -116,7 +116,9 @@ class MessageBuffer:
             return True
         
         # 有消息且距离上次刷新超过指定时间
-        if self.messages and (time.time() - self.last_flush) > max_age_seconds:
+        # 注意：last_flush 初始化为创建时间，避免首次立即触发
+        if len(self.messages) >= 3 and (time.time() - self.last_flush) > max_age_seconds:
+            # 至少需要 3 条消息才考虑时间触发，避免过于频繁更新
             return True
         
         return False
@@ -139,7 +141,8 @@ class MessageBuffer:
     def from_dict(d: dict) -> "MessageBuffer":
         buffer = MessageBuffer(
             user_id=d.get("user_id", ""),
-            last_flush=d.get("last_flush", 0),
         )
+        # 从存储恢复时使用保存的 last_flush，如果没有则使用当前时间
+        buffer.last_flush = d.get("last_flush") or time.time()
         buffer.messages = d.get("messages", [])
         return buffer

@@ -213,6 +213,33 @@ class QuickPersona(Star):
         except Exception:
             return default
 
+    # ==================== KV 存储 ====================
+
+    async def get_kv_data(self, key: str, default: Any = None) -> Any:
+        """从持久化存储获取数据"""
+        try:
+            file_path = self.data_dir / f"{key}.json"
+            if file_path.exists():
+                import json
+                with open(file_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            return default if default is not None else {}
+        except Exception as e:
+            logger.warning(f"[lzpersona] 读取 KV 数据失败 ({key}): {e}")
+            return default if default is not None else {}
+
+    async def put_kv_data(self, key: str, data: Any) -> bool:
+        """保存数据到持久化存储"""
+        try:
+            import json
+            file_path = self.data_dir / f"{key}.json"
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"[lzpersona] 保存 KV 数据失败 ({key}): {e}")
+            return False
+
     def _get_max_prompt_length(self) -> int:
         return int(self._get_cfg("max_prompt_length", 800) or 800)
 
@@ -1474,7 +1501,8 @@ class QuickPersona(Star):
         except Exception as e:
             logger.debug(f"[lzpersona] 画像消息处理失败: {e}")
         
-        # 注意：不调用 event.stop_event()，让事件继续传播到其他处理器
+        # 必须返回 req 让请求继续传播
+        return req
 
     # ==================== 画像命令组 ====================
 
