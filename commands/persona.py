@@ -14,9 +14,6 @@ from astrbot.core.star.filter.command import GreedyStr
 
 from ..core import (
     PERSONA_PREFIX,
-    DEFAULT_GEN_TEMPLATE,
-    DEFAULT_REFINE_TEMPLATE,
-    DEFAULT_SHRINK_TEMPLATE,
     SessionState,
     PendingPersona,
     PromptFormat,
@@ -360,13 +357,11 @@ class PersonaCommands:
             yield event.plain_result("❌ 生成失败，请检查 LLM 配置或稍后重试")
             return
 
-        # 自动压缩
+        # 自动压缩（使用高级方法）
         max_len = self.config.max_prompt_length
         if len(result) > max_len and self.config.auto_compress:
             yield event.plain_result(f"⚠️ 生成的提示词过长({len(result)}字符)，正在自动压缩...")
-            shrink_template = self.config.get_template("persona_shrink_template", DEFAULT_SHRINK_TEMPLATE)
-            shrink_prompt = shrink_template.format(original_prompt=result, intensity="轻度")
-            compressed = await self.llm_service.call_architect(shrink_prompt, event)
+            compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
             if compressed and len(compressed) < len(result):
                 result = compressed
 
@@ -411,12 +406,11 @@ class PersonaCommands:
                 yield event.plain_result("❌ 应用人格失败，请查看日志")
 
     async def _quick_generation(self: "QuickPersona", event: AstrMessageEvent, description: str, session):
-        """快速生成流程"""
+        """快速生成流程（使用 LLMService 高级方法）"""
         yield event.plain_result(f"🔄 正在根据描述生成人格...\n描述: {description}")
 
-        template = self.config.get_template("persona_gen_template", DEFAULT_GEN_TEMPLATE)
-        prompt = template.format(description=description)
-        result = await self.llm_service.call_architect(prompt, event)
+        # 使用 LLMService 高级方法
+        result = await self.llm_service.generate_persona(description, event, PromptFormat.NATURAL)
 
         if not result:
             yield event.plain_result("❌ 生成失败，请检查 LLM 配置或稍后重试")
@@ -425,9 +419,7 @@ class PersonaCommands:
         max_len = self.config.max_prompt_length
         if len(result) > max_len and self.config.auto_compress:
             yield event.plain_result(f"⚠️ 生成的提示词过长({len(result)}字符)，正在自动压缩...")
-            shrink_template = self.config.get_template("persona_shrink_template", DEFAULT_SHRINK_TEMPLATE)
-            shrink_prompt = shrink_template.format(original_prompt=result, intensity="轻度")
-            compressed = await self.llm_service.call_architect(shrink_prompt, event)
+            compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
             if compressed and len(compressed) < len(result):
                 result = compressed
 
@@ -682,9 +674,8 @@ class PersonaCommands:
                 return
             yield event.plain_result(f"🔄 正在根据反馈优化人格...\n反馈: {feedback}")
 
-        template = self.config.get_template("persona_refine_template", DEFAULT_REFINE_TEMPLATE)
-        prompt = template.format(current_prompt=current_prompt, feedback=feedback)
-        result = await self.llm_service.call_architect(prompt, event)
+        # 使用 LLMService 高级方法
+        result = await self.llm_service.refine_persona(current_prompt, feedback, PromptFormat.NATURAL, event)
 
         if not result:
             yield event.plain_result("❌ 优化失败，请稍后重试")
@@ -739,9 +730,8 @@ class PersonaCommands:
         original_len = len(persona.system_prompt)
         yield event.plain_result(f"🔄 正在压缩人格提示词...\n原始长度: {original_len}字符\n压缩强度: {intensity}")
 
-        template = self.config.get_template("persona_shrink_template", DEFAULT_SHRINK_TEMPLATE)
-        prompt = template.format(original_prompt=persona.system_prompt, intensity=intensity)
-        result = await self.llm_service.call_architect(prompt, event)
+        # 使用 LLMService 高级方法
+        result = await self.llm_service.shrink_persona(persona.system_prompt, intensity, PromptFormat.NATURAL, event)
 
         if not result:
             yield event.plain_result("❌ 压缩失败，请稍后重试")

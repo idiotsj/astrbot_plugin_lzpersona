@@ -69,8 +69,9 @@ class LLMService:
             if provider_id:
                 provider = self.context.get_provider_by_id(provider_id)
             else:
+                # 使用属性访问 unified_msg_origin（推荐方式）
                 provider = self.context.get_using_provider(
-                    umo=getattr(event, "unified_msg_origin", None)
+                    umo=event.unified_msg_origin if event else None
                 )
 
             if not provider or not hasattr(provider, "text_chat"):
