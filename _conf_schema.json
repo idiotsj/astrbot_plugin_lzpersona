@@ -10,6 +10,12 @@
     "default": true,
     "hint": "启用后生成人格时会先分析描述缺失的字段，让用户选择补充"
   },
+  "default_prompt_format": {
+    "type": "string",
+    "description": "默认人格提示词格式",
+    "default": "natural",
+    "hint": "可选: natural(自然语言), markdown(MD), xml, json, yaml。不同格式适合不同模型"
+  },
   "architect_provider_id": {
     "type": "string",
     "description": "架构师模型 Provider ID（用于生成/优化人格）",

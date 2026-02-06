@@ -9,6 +9,18 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from astrbot.api import logger
 
+from ..core import (
+    PromptFormat,
+    parse_format,
+    get_generate_template,
+    get_format_hint,
+    get_format_display_name,
+    FORMAT_CONVERT_TEMPLATE,
+    REFINE_TEMPLATE_WITH_FORMAT,
+    SHRINK_TEMPLATE_WITH_FORMAT,
+    GENERATE_WITH_SUPPLEMENTS_TEMPLATE,
+)
+
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
     from astrbot.api.star import Context
@@ -195,7 +207,8 @@ class LLMService:
         }
 
     async def generate_with_supplements(
-        self, description: str, supplements: str, auto_generate_fields: list, event: "AstrMessageEvent"
+        self, description: str, supplements: str, auto_generate_fields: list, 
+        event: "AstrMessageEvent", format_type: PromptFormat = PromptFormat.NATURAL
     ) -> Optional[str]:
         """根据用户描述和补充内容生成人格
 
@@ -204,19 +217,122 @@ class LLMService:
             supplements: 用户补充的内容
             auto_generate_fields: 需要由 AI 自动生成的字段列表
             event: 消息事件
+            format_type: 输出格式
 
         Returns:
             生成的人格提示词
         """
-        from ..core import DEFAULT_GUIDED_GEN_TEMPLATE
-
         # 格式化自动生成字段
         auto_fields_str = ", ".join(auto_generate_fields) if auto_generate_fields else "无"
+        
+        format_name = get_format_display_name(format_type)
+        format_hint = get_format_hint(format_type)
 
-        prompt = DEFAULT_GUIDED_GEN_TEMPLATE.format(
+        prompt = GENERATE_WITH_SUPPLEMENTS_TEMPLATE.format(
             description=description,
             supplements=supplements if supplements else "无",
             auto_generate_fields=auto_fields_str,
+            format_type=format_name,
+            format_structure_hint=format_hint,
+        )
+
+        return await self.call_architect(prompt, event)
+
+    async def generate_persona(
+        self, description: str, event: "AstrMessageEvent", 
+        format_type: PromptFormat = PromptFormat.NATURAL
+    ) -> Optional[str]:
+        """根据描述生成指定格式的人格
+
+        Args:
+            description: 人格描述
+            event: 消息事件
+            format_type: 输出格式
+
+        Returns:
+            生成的人格提示词
+        """
+        template = get_generate_template(format_type)
+        prompt = template.format(description=description)
+        return await self.call_architect(prompt, event)
+
+    async def convert_format(
+        self, original_prompt: str, source_format: PromptFormat, 
+        target_format: PromptFormat, event: "AstrMessageEvent"
+    ) -> Optional[str]:
+        """将人格提示词从一种格式转换为另一种格式
+
+        Args:
+            original_prompt: 原始人格提示词
+            source_format: 源格式
+            target_format: 目标格式
+            event: 消息事件
+
+        Returns:
+            转换后的人格提示词
+        """
+        if source_format == target_format:
+            return original_prompt
+
+        source_name = get_format_display_name(source_format)
+        target_name = get_format_display_name(target_format)
+        target_hint = get_format_hint(target_format)
+
+        prompt = FORMAT_CONVERT_TEMPLATE.format(
+            source_format=source_name,
+            original_prompt=original_prompt,
+            target_format=target_name,
+            format_structure_hint=target_hint,
+        )
+
+        return await self.call_architect(prompt, event)
+
+    async def refine_persona(
+        self, current_prompt: str, feedback: str, 
+        format_type: PromptFormat, event: "AstrMessageEvent"
+    ) -> Optional[str]:
+        """根据反馈优化人格（保持格式）
+
+        Args:
+            current_prompt: 当前人格提示词
+            feedback: 用户反馈
+            format_type: 当前格式
+            event: 消息事件
+
+        Returns:
+            优化后的人格提示词
+        """
+        format_name = get_format_display_name(format_type)
+
+        prompt = REFINE_TEMPLATE_WITH_FORMAT.format(
+            format_type=format_name,
+            current_prompt=current_prompt,
+            feedback=feedback,
+        )
+
+        return await self.call_architect(prompt, event)
+
+    async def shrink_persona(
+        self, original_prompt: str, intensity: str, 
+        format_type: PromptFormat, event: "AstrMessageEvent"
+    ) -> Optional[str]:
+        """压缩人格提示词（保持格式）
+
+        Args:
+            original_prompt: 原始人格提示词
+            intensity: 压缩强度（轻度/中度/极限）
+            format_type: 当前格式
+            event: 消息事件
+
+        Returns:
+            压缩后的人格提示词
+        """
+        format_name = get_format_display_name(format_type)
+
+        prompt = SHRINK_TEMPLATE_WITH_FORMAT.format(
+            format_type=format_name,
+            original_prompt=original_prompt,
+            intensity=intensity,
         )
 
         return await self.call_architect(prompt, event)

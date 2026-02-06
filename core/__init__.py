@@ -21,6 +21,18 @@ from .profile_constants import (
     DEFAULT_PROFILE_INIT_TEMPLATE,
     PROFILE_CARD_TEMPLATE,
 )
+from .format_templates import (
+    PromptFormat,
+    FORMAT_ALIASES,
+    parse_format,
+    get_generate_template,
+    get_format_hint,
+    get_format_display_name,
+    FORMAT_CONVERT_TEMPLATE,
+    REFINE_TEMPLATE_WITH_FORMAT,
+    SHRINK_TEMPLATE_WITH_FORMAT,
+    GENERATE_WITH_SUPPLEMENTS_TEMPLATE,
+)
 
 __all__ = [
     # 常量
@@ -53,4 +65,15 @@ __all__ = [
     "MessageBuffer",
     # 状态管理
     "QuickPersonaState",
+    # 格式模板
+    "PromptFormat",
+    "FORMAT_ALIASES",
+    "parse_format",
+    "get_generate_template",
+    "get_format_hint",
+    "get_format_display_name",
+    "FORMAT_CONVERT_TEMPLATE",
+    "REFINE_TEMPLATE_WITH_FORMAT",
+    "SHRINK_TEMPLATE_WITH_FORMAT",
+    "GENERATE_WITH_SUPPLEMENTS_TEMPLATE",
 ]

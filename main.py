@@ -34,6 +34,10 @@ from .core import (
     # 画像相关
     ProfileMode,
     PROFILE_CARD_TEMPLATE,
+    # 格式相关
+    PromptFormat,
+    parse_format,
+    get_format_display_name,
 )
 from .services import LLMService, PersonaService, ProfileService
 from .utils import shorten_prompt, generate_persona_id, get_session_id
@@ -148,7 +152,7 @@ PERSONA_CARD_TEMPLATE = """
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.0.5", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "1.1.0", ""
 )
 class QuickPersona(Star):
     """快捷人格生成器插件
@@ -225,6 +229,11 @@ class QuickPersona(Star):
         custom = str(self._get_cfg(template_key, "") or "").strip()
         return custom if custom else default
 
+    def _get_default_format(self) -> PromptFormat:
+        """获取默认人格提示词格式"""
+        format_str = str(self._get_cfg("default_prompt_format", "natural") or "natural")
+        return parse_format(format_str)
+
     # ==================== 渲染辅助 ====================
 
     async def _render_long_text(
@@ -298,6 +307,7 @@ class QuickPersona(Star):
 /快捷人格 生成人格 <描述> - 根据描述生成人格
 /快捷人格 优化人格 <反馈> - 优化人格（可直接优化未生成的人格）
 /快捷人格 压缩人格 [强度] - 压缩提示词(轻度/中度/极限)
+/快捷人格 转换格式 <格式> - 转换提示词格式(natural/markdown/xml/json/yaml)
 
 📋 管理
 /快捷人格 查看状态 - 查看当前状态
@@ -1109,6 +1119,70 @@ class QuickPersona(Star):
                     yield r
             else:
                 yield event.plain_result("❌ 应用失败，请查看日志")
+
+    @qp.command("转换格式", alias={"format", "convert"})
+    async def cmd_convert_format(self, event: AstrMessageEvent, target_format: str = ""):
+        """将人格转换为指定格式"""
+        if not target_format:
+            formats = "natural(自然语言), markdown(MD), xml, json, yaml"
+            yield event.plain_result(f"请指定目标格式：{formats}\n例如：/快捷人格 转换格式 markdown")
+            return
+        
+        session_id = get_session_id(event)
+        session = self.state.get_session(session_id)
+        
+        # 获取要转换的人格内容
+        if session.state == SessionState.WAITING_CONFIRM and session.pending_persona:
+            current_prompt = session.pending_persona.system_prompt
+            persona_id = session.pending_persona.persona_id
+            source = "待确认人格"
+        elif session.current_persona_id:
+            try:
+                persona = await self.persona_service.get_persona(session.current_persona_id)
+                current_prompt = persona.system_prompt
+                persona_id = session.current_persona_id
+                source = "当前人格"
+            except ValueError:
+                yield event.plain_result(f"❌ 未找到人格: {session.current_persona_id}")
+                return
+        else:
+            yield event.plain_result("请先选择或生成一个人格")
+            return
+        
+        target = parse_format(target_format)
+        source_format = self._get_default_format()  # 假设当前格式为默认格式
+        target_name = get_format_display_name(target)
+        
+        yield event.plain_result(f"🔄 正在将{source}转换为 {target_name} 格式...")
+        
+        result = await self.llm_service.convert_format(
+            current_prompt, source_format, target, event
+        )
+        
+        if not result:
+            yield event.plain_result("❌ 格式转换失败")
+            return
+        
+        # 更新待确认人格
+        session.state = SessionState.WAITING_CONFIRM
+        session.pending_persona = PendingPersona(
+            persona_id=persona_id,
+            system_prompt=result,
+            created_at=time.time(),
+            mode="convert",
+            original_prompt=current_prompt,
+        )
+        
+        async for r in self._render_persona_card(
+            event,
+            icon="🔄",
+            title=f"格式转换完成",
+            subtitle=f"目标格式: {target_name} | 待确认",
+            content=result,
+            meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+            footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+        ):
+            yield r
 
     @qp.command("压缩人格", alias={"shrink"})
     async def cmd_shrink(self, event: AstrMessageEvent, intensity: str = "轻度"):
