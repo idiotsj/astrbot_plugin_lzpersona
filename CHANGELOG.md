@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 改进
 - ⚡ **命令解析重构** - 使用正则表达式替换硬编码命令前缀列表（响应 Linus 评审意见）
 - ⚡ **LLM 调用重试机制** - 新增 `llm_max_retries` 配置项，失败时自动重试（响应 Tony 评审意见）
+- 📝 **JSON 解析器文档完善** - 更新 `_extract_json_object()` 函数注释，明确支持字符串内转义大括号的处理
 
 ### 新增配置
 - `llm_max_retries`: LLM 调用最大重试次数（默认 2）

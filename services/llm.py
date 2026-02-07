@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 def _extract_json_object(text: str) -> Optional[dict]:
-    """从文本中提取完整的 JSON 对象（支持嵌套）
+    """从文本中提取完整的 JSON 对象（支持嵌套和字符串内的大括号）
     
     Args:
         text: 可能包含 JSON 的文本
@@ -47,10 +47,34 @@ def _extract_json_object(text: str) -> Optional[dict]:
         return None
     
     brace_count = 0
+    in_string = False
+    escape_next = False
+    
     for i in range(start, len(text)):
-        if text[i] == '{':
+        c = text[i]
+        
+        # 处理转义字符
+        if escape_next:
+            escape_next = False
+            continue
+        
+        if c == '\\':
+            escape_next = True
+            continue
+        
+        # 处理字符串边界
+        if c == '"':
+            in_string = not in_string
+            continue
+        
+        # 字符串内的字符不计入大括号计数
+        if in_string:
+            continue
+        
+        # 计数大括号
+        if c == '{':
             brace_count += 1
-        elif text[i] == '}':
+        elif c == '}':
             brace_count -= 1
             if brace_count == 0:
                 try:
