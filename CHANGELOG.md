@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-02-08
+
+### 改进
+- 📝 **画像分析指引增强** - LLM 提示词新增详细的上下文分析指导
+  - 互动模式分析：识别用户是主动发起话题还是被动回应
+  - 社交关系分析：分析与群内其他成员、机器人的关系
+  - 表达方式分析：语气词、表情符号、网络用语等
+  - 情绪变化分析：不同话题下的情绪状态变化
+
+---
+
+## [2.0.3] - 2026-02-08
+
+### 新增
+- ✨ **画像对话上下文** - 更新画像时自动获取对话上下文
+  - 从 `message_history_manager` 获取会话历史
+  - 包含其他用户消息和机器人回复，帮助分析互动模式
+  - 新增 `profile_context_size` 配置：上下文消息条数（默认 20）
+  - 新增 `profile_include_bot` 配置：是否包含机器人回复（默认 true）
+
+### 修复
+- 🐛 **JSON 解析统一** - 画像服务复用 `llm.py` 中的 `_extract_json_object()` 函数，支持嵌套 JSON
+- 🐛 **机器人消息识别** - 修复机器人回复识别逻辑，正确匹配 `sender_id == "bot"` 格式
+
+### 改进
+- ⚡ **LLM 提示词增强** - 画像更新和初始化时提供对话上下文，提高画像质量
+
+---
+
 ## [2.0.2] - 2026-02-06
 
 ### 改进

@@ -95,5 +95,17 @@
     "description": "画像缓冲区最大保留时间(秒)",
     "default": 300,
     "hint": "消息缓冲区超过此时间后触发更新（即使消息数未达阈值）"
+  },
+  "profile_context_size": {
+    "type": "int",
+    "description": "画像对话上下文条数",
+    "default": 20,
+    "hint": "更新画像时获取的对话上下文条数（包含群内其他用户消息）"
+  },
+  "profile_include_bot": {
+    "type": "bool",
+    "description": "画像上下文包含机器人回复",
+    "default": true,
+    "hint": "启用后上下文将包含机器人的回复，帮助分析用户互动模式"
   }
 }
