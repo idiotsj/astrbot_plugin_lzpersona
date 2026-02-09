@@ -345,10 +345,14 @@ class PersonaCommands:
         # 自动压缩（使用高级方法）
         max_len = self.config.max_prompt_length
         if len(result) > max_len and self.config.auto_compress:
-            yield event.plain_result(f"⚠️ 生成的提示词过长({len(result)}字符)，正在自动压缩...")
+            original_len = len(result)
+            yield event.plain_result(f"⚠️ 生成的提示词过长({original_len}字符，限制{max_len})，正在自动压缩...")
             compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
-            if compressed and len(compressed) < len(result):
+            if compressed and len(compressed) < original_len:
                 result = compressed
+                yield event.plain_result(f"✅ 自动压缩完成: {original_len} → {len(result)} 字符")
+            else:
+                yield event.plain_result(f"⚠️ 自动压缩效果不佳，保留原始结果")
 
         persona_id = generate_persona_id(description)
 
@@ -403,10 +407,14 @@ class PersonaCommands:
 
         max_len = self.config.max_prompt_length
         if len(result) > max_len and self.config.auto_compress:
-            yield event.plain_result(f"⚠️ 生成的提示词过长({len(result)}字符)，正在自动压缩...")
+            original_len = len(result)
+            yield event.plain_result(f"⚠️ 生成的提示词过长({original_len}字符，限制{max_len})，正在自动压缩...")
             compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
-            if compressed and len(compressed) < len(result):
+            if compressed and len(compressed) < original_len:
                 result = compressed
+                yield event.plain_result(f"✅ 自动压缩完成: {original_len} → {len(result)} 字符")
+            else:
+                yield event.plain_result(f"⚠️ 自动压缩效果不佳，保留原始结果")
 
         persona_id = generate_persona_id(description)
 

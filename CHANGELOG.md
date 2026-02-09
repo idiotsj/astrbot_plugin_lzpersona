@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] - 2026-02-10
+
+### 修复
+- 🐛 **自动压缩反馈增强** - 生成人格时自动压缩现在会：
+  - 显示压缩前后的字符数变化 (如 "2000 → 1500 字符")
+  - 压缩失败或效果不佳时提示用户
+  - 同时修复了 `_generate_with_supplements` 和 `_quick_generation` 两处逻辑
+
+---
+
 ## [2.0.5] - 2026-02-10
 
 ### 修复
