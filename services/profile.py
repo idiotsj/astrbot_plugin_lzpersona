@@ -51,18 +51,21 @@ class ProfileService:
         self._monitors: Dict[str, ProfileMonitor] = {}
         self._buffers: Dict[str, MessageBuffer] = {}
         
-        # 配置（从插件配置获取）
-        self._min_messages_for_update = self._get_config_int("profile_min_messages", 10)
-        self._max_buffer_age = self._get_config_int("profile_max_buffer_age", 300)
-        self._context_size = self._get_config_int("profile_context_size", 20)
-        self._include_bot_replies = self._get_config_bool("profile_include_bot", True)
-        
         # 标记是否已加载
         self._loaded = False
+        
+        # 配置（延迟获取，避免初始化时 config_service 还未就绪）
+        self._min_messages_for_update: Optional[int] = None
+        self._max_buffer_age: Optional[int] = None
+        self._context_size: Optional[int] = None
+        self._include_bot_replies: Optional[bool] = None
 
     def _get_config_int(self, key: str, default: int) -> int:
-        """从插件配置获取整数值"""
+        """从插件配置获取整数值 - 使用 plugin.config_service"""
         try:
+            if hasattr(self.plugin, 'config_service'):
+                return self.plugin.config_service.get_int(key, default)
+            # 回退到 context.get_config()
             config = self.context.get_config()
             if config:
                 return int(config.get(key, default) or default)
@@ -71,8 +74,11 @@ class ProfileService:
         return default
 
     def _get_config_bool(self, key: str, default: bool) -> bool:
-        """从插件配置获取布尔值"""
+        """从插件配置获取布尔值 - 使用 plugin.config_service"""
         try:
+            if hasattr(self.plugin, 'config_service'):
+                return self.plugin.config_service.get_bool(key, default)
+            # 回退到 context.get_config()
             config = self.context.get_config()
             if config:
                 val = config.get(key, default)
@@ -83,6 +89,34 @@ class ProfileService:
         except Exception:
             pass
         return default
+
+    @property
+    def min_messages_for_update(self) -> int:
+        """最小消息数阈值"""
+        if self._min_messages_for_update is None:
+            self._min_messages_for_update = self._get_config_int("profile_min_messages", 10)
+        return self._min_messages_for_update
+
+    @property
+    def max_buffer_age(self) -> int:
+        """缓冲区最大时间（秒）"""
+        if self._max_buffer_age is None:
+            self._max_buffer_age = self._get_config_int("profile_max_buffer_age", 300)
+        return self._max_buffer_age
+
+    @property
+    def context_size(self) -> int:
+        """上下文消息条数"""
+        if self._context_size is None:
+            self._context_size = self._get_config_int("profile_context_size", 20)
+        return self._context_size
+
+    @property
+    def include_bot_replies(self) -> bool:
+        """是否包含机器人回复"""
+        if self._include_bot_replies is None:
+            self._include_bot_replies = self._get_config_bool("profile_include_bot", True)
+        return self._include_bot_replies
 
     async def load(self):
         """从 KV 存储加载数据"""
@@ -242,8 +276,8 @@ class ProfileService:
         if nickname and user_id in self._profiles:
             self._profiles[user_id].nickname = nickname
         
-        # 检查是否需要刷新
-        if buffer.should_flush(self._min_messages_for_update, self._max_buffer_age):
+        # 检查是否需要刷新（使用属性获取配置值）
+        if buffer.should_flush(self.min_messages_for_update, self.max_buffer_age):
             await self._update_profile(user_id, event)
             return True
         
@@ -350,7 +384,7 @@ class ProfileService:
                 platform_id=platform_id,
                 user_id=session_id,  # 这里的 user_id 实际上是会话 ID
                 page=1,
-                page_size=self._context_size,
+                page_size=self.context_size,
             )
             
             # 转换为标准格式
@@ -367,8 +401,8 @@ class ProfileService:
                 # AstrBot 存储机器人消息时 sender_id = "bot"
                 is_bot = not sender_id or sender_id == "bot" or sender_id.startswith("bot_")
                 
-                # 如果配置不包含机器人回复，跳过
-                if is_bot and not self._include_bot_replies:
+                # 如果配置不包含机器人回复，跳过（使用属性获取配置值）
+                if is_bot and not self.include_bot_replies:
                     continue
                 
                 context_messages.append({

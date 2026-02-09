@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from ..core import ProfileMode, PROFILE_CARD_TEMPLATE
+from ..core import ProfileMode
 from ..utils import shorten_prompt
 
 if TYPE_CHECKING:
@@ -150,30 +150,25 @@ class ProfileCommands:
             f"📊 已分析消息: {profile.message_count} 条",
         ]
         
-        # 尝试渲染画像卡片
+        # 尝试渲染画像卡片（使用 render_service）
         try:
-            image_url = await self.html_render(
-                PROFILE_CARD_TEMPLATE,
-                {
-                    "avatar_emoji": "👤",
-                    "nickname": profile.nickname or "未知",
-                    "user_id": profile.user_id,
-                    "profile_text": profile.profile_text or "暂无画像描述",
-                    "traits": profile.traits,
-                    "interests": profile.interests,
-                    "speaking_style": profile.speaking_style,
-                    "emotional_tendency": profile.emotional_tendency,
-                    "message_count": profile.message_count,
-                    "last_updated": last_updated,
+            async for result in self.render_service.render_persona_card(
+                event,
+                icon="👤",
+                title=profile.nickname or "未知用户",
+                subtitle=f"用户ID: {profile.user_id}",
+                content=profile.profile_text or "暂无画像描述",
+                meta_info={
+                    "性格特征": ", ".join(profile.traits) if profile.traits else "暂无",
+                    "兴趣爱好": ", ".join(profile.interests) if profile.interests else "暂无",
+                    "说话风格": profile.speaking_style or "暂无",
+                    "情感倾向": profile.emotional_tendency or "暂无",
+                    "已分析消息": f"{profile.message_count} 条",
                 },
-                options={"full_page": True}
-            )
-            # 验证渲染结果
-            if image_url:
-                yield event.image_result(image_url)
-            else:
-                logger.warning("[lzpersona] 画像卡片渲染返回空值")
-                yield event.plain_result("\n".join(text_lines))
+                footer=f"更新时间: {last_updated}",
+            ):
+                yield result
+                return  # 成功渲染后返回
         except Exception as e:
             logger.warning(f"[lzpersona] 画像卡片渲染失败: {e}")
             # 降级为纯文本

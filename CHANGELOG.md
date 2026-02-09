@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2026-02-10
+
+### 修复
+- 🐛 **画像服务配置获取修复** - 改用延迟属性获取配置，避免初始化时 `config_service` 未就绪
+  - `min_messages_for_update`、`max_buffer_age`、`context_size`、`include_bot_replies` 改为属性方法
+  - 优先使用 `plugin.config_service`，回退到 `context.get_config()`
+- 🐛 **画像渲染调用修复** - 命令模块使用 `render_service.render_persona_card()` 替代不存在的 `self.html_render()`
+- 🐛 **属性访问一致性修复** - `should_flush()`、上下文获取等处统一使用属性方法而非私有变量
+
+### 改进
+- ⚡ **代码清理** - 移除 `commands/profile.py` 中未使用的 `PROFILE_CARD_TEMPLATE` 导入
+
+---
+
 ## [2.0.4] - 2026-02-08
 
 ### 改进
