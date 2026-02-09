@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.7] - 2026-02-10
+
+### 改进
+- � **自动压缩调试日志** - 添加 logger.debug 日志输出 result_len/max_len/auto_compress 值，便于定位问题
+
+---
+
 ## [2.0.6] - 2026-02-10
 
 ### 修复
