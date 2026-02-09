@@ -42,7 +42,7 @@ from .utils import shorten_prompt, generate_persona_id, get_session_id
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.0.7", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.0.8", ""
 )
 class QuickPersona(Star, PersonaCommands, ProfileCommands):
     """快捷人格生成器插件

@@ -137,22 +137,30 @@ class PersonaService:
             curr_conv_id = await self.conversation_manager.get_curr_conversation_id(
                 umo
             )
+            
+            logger.debug(f"[lzpersona] activate_persona: umo={umo}, persona_id={persona_id}, curr_conv_id={curr_conv_id}")
 
             if curr_conv_id:
                 # 更新现有对话的人格
                 await self.conversation_manager.update_conversation(
-                    umo=umo, conversation_id=curr_conv_id, persona_id=persona_id
+                    unified_msg_origin=umo, 
+                    conversation_id=curr_conv_id, 
+                    persona_id=persona_id
                 )
+                logger.info(f"[lzpersona] 已更新对话 {curr_conv_id} 的人格为 {persona_id}")
                 return True, f"已激活人格: {persona_id}"
             else:
                 # 创建新对话并关联人格
                 new_conv_id = await self.conversation_manager.new_conversation(
-                    umo=umo, persona_id=persona_id, title=f"人格: {persona_id}"
+                    unified_msg_origin=umo, 
+                    persona_id=persona_id, 
+                    title=f"人格: {persona_id}"
                 )
+                logger.info(f"[lzpersona] 已创建新对话 {new_conv_id} 并关联人格 {persona_id}")
                 return True, f"已创建新对话并激活人格: {persona_id}\n对话ID: {new_conv_id}"
 
         except Exception as e:
-            logger.error(f"[lzpersona] 激活人格失败: {e}")
+            logger.error(f"[lzpersona] 激活人格失败: {e}", exc_info=True)
             return False, str(e)
 
     async def new_conversation(
@@ -169,13 +177,13 @@ class PersonaService:
         """
         try:
             new_conv_id = await self.conversation_manager.new_conversation(
-                umo=umo,
+                unified_msg_origin=umo,
                 persona_id=persona_id if persona_id else None,
                 title=f"人格: {persona_id}" if persona_id else None,
             )
             return True, new_conv_id
         except Exception as e:
-            logger.error(f"[lzpersona] 新建对话失败: {e}")
+            logger.error(f"[lzpersona] 新建对话失败: {e}", exc_info=True)
             return False, str(e)
 
     def is_plugin_persona(self, persona_id: str) -> bool:

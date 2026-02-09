@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+from astrbot.api import logger
 from ..core import PromptFormat, parse_format
 
 if TYPE_CHECKING:
@@ -16,15 +17,19 @@ class ConfigService:
     def __init__(self, context: "Context"):
         self.context = context
         self._cache: dict = {}
+        self._debug_logged = False
 
     def get(self, key: str, default: Any = None) -> Any:
         """获取配置项"""
         try:
             config = self.context.get_config()
             if config is None:
+                logger.warning(f"[lzpersona] 配置获取失败: config is None, key={key}, 使用默认值={default}")
                 return default
-            return config.get(key, default)
-        except Exception:
+            value = config.get(key, default)
+            return value
+        except Exception as e:
+            logger.warning(f"[lzpersona] 配置获取异常: key={key}, error={e}, 使用默认值={default}")
             return default
 
     def get_int(self, key: str, default: int = 0) -> int:
@@ -48,7 +53,16 @@ class ConfigService:
 
     @property
     def max_prompt_length(self) -> int:
-        return self.get_int("max_prompt_length", 800)
+        val = self.get_int("max_prompt_length", 800)
+        if not self._debug_logged:
+            # 首次获取时打印完整配置，便于调试
+            try:
+                config = self.context.get_config()
+                logger.info(f"[lzpersona] 配置检查: max_prompt_length={val}, auto_compress={config.get('auto_compress') if config else 'N/A'}")
+            except Exception:
+                pass
+            self._debug_logged = True
+        return val
 
     @property
     def confirm_before_apply(self) -> bool:
