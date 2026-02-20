@@ -42,7 +42,8 @@ class PersonaCommands:
             help_text = """快捷人格生成器 - 命令列表
 
 🤖 智能入口（推荐）
-/人格 <自然语言> - 智能识别意图，自动执行
+/快捷人格 智能 <自然语言> - 智能识别意图，自动执行
+/快捷人格 <自然语言> - 简写形式，同上
 
 📝 生成与优化
 /快捷人格 生成人格 <描述> - 根据描述生成人格
@@ -60,10 +61,12 @@ class PersonaCommands:
 /快捷人格 删除人格 <人格ID> - 删除人格
 
 💡 使用流程示例：
-  /人格 生成一个傲娇猫娘  → 生成人格
-  /人格 让她更傲娇一点    → 直接优化未生成的人格
-  /人格 确认              → 满意后保存人格
-  /人格 应用              → 让AI使用此人格"""
+  /快捷人格 生成一个傲娇猫娘  → 生成人格
+  /快捷人格 让她更傲娇一点    → 直接优化未生成的人格
+  /快捷人格 确认              → 满意后保存人格
+  /快捷人格 应用              → 让AI使用此人格
+
+📌 别名：qp, quickpersona"""
             yield event.plain_result(help_text)
         finally:
             event.stop_event()
@@ -129,7 +132,7 @@ class PersonaCommands:
                     yield r
             else:
                 yield event.plain_result(
-                    "请指定要激活的人格，例如：/人格 切换到猫娘\n"
+                    "请指定要激活的人格，例如：/快捷人格 智能 切换到猫娘\n"
                     f"可用人格: {persona_list}"
                 )
         elif action == "delete":

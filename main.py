@@ -197,7 +197,7 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
         sender_id = str(event.get_sender_id() or "")
         sender_name = event.get_sender_name() or ""
         group_id = ""
-        
+
         # 使用属性访问 unified_msg_origin（推荐方式）
         umo = event.unified_msg_origin or ""
         if ":group:" in umo:
@@ -218,9 +218,9 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
 
         return req
 
-    # ==================== 智能入口 ====================
+    # ==================== 智能入口（作为命令组的子命令）====================
 
-    @filter.command("人格", alias={"persona"})
+    @qp.command("智能", alias={"smart", "s"})
     async def cmd_smart(self, event: AstrMessageEvent, query: GreedyStr = ""):
         """智能意图识别入口"""
         query = str(query).strip()
