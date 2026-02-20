@@ -42,7 +42,12 @@ class ConfigService:
 
     def get_bool(self, key: str, default: bool = False) -> bool:
         """获取布尔配置"""
-        return bool(self.get(key, default))
+        val = self.get(key, default)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes", "on")
+        return bool(val)
 
     def get_str(self, key: str, default: str = "") -> str:
         """获取字符串配置"""

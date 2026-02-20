@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
 class ProfileService:
     """用户画像服务
-    
+
     负责：
-    1. 管理画像监控配置
+    1. 管理画像监��配置
     2. 收集目标用户消息到缓冲区
     3. 调用 LLM 更新画像
     4. 持久化存储画像数据
@@ -45,15 +45,17 @@ class ProfileService:
     def __init__(self, context: "Context", plugin_instance):
         self.context = context
         self.plugin = plugin_instance  # 用于调用 KV 存储和 LLM
-        
+
         # 内存缓存
         self._profiles: Dict[str, UserProfile] = {}
         self._monitors: Dict[str, ProfileMonitor] = {}
         self._buffers: Dict[str, MessageBuffer] = {}
-        
+
         # 标记是否已加载
         self._loaded = False
-        
+        # 加载锁，防止并发加载
+        self._load_lock = asyncio.Lock()
+
         # 配置（延迟获取，避免初始化时 config_service 还未就绪）
         self._min_messages_for_update: Optional[int] = None
         self._max_buffer_age: Optional[int] = None
@@ -120,29 +122,31 @@ class ProfileService:
 
     async def load(self):
         """从 KV 存储加载数据"""
-        if self._loaded:
-            return
-        
-        try:
-            # 加载画像数据
-            profiles_data = await self.plugin.get_kv_data(self.KV_PROFILES, {})
-            for user_id, data in profiles_data.items():
-                self._profiles[user_id] = UserProfile.from_dict(data)
-            
-            # 加载监控配置
-            monitors_data = await self.plugin.get_kv_data(self.KV_MONITORS, {})
-            for user_id, data in monitors_data.items():
-                self._monitors[user_id] = ProfileMonitor.from_dict(data)
-            
-            # 加载消息缓冲区
-            buffers_data = await self.plugin.get_kv_data(self.KV_BUFFERS, {})
-            for user_id, data in buffers_data.items():
-                self._buffers[user_id] = MessageBuffer.from_dict(data)
-            
-            self._loaded = True
-            logger.info(f"[lzpersona] 画像服务已加载: {len(self._profiles)} 个画像, {len(self._monitors)} 个监控")
-        except Exception as e:
-            logger.error(f"[lzpersona] 加载画像数据失败: {e}")
+        # 使用锁防止并发加载
+        async with self._load_lock:
+            if self._loaded:
+                return
+
+            try:
+                # 加载画像数据
+                profiles_data = await self.plugin.get_kv_data(self.KV_PROFILES, {})
+                for user_id, data in profiles_data.items():
+                    self._profiles[user_id] = UserProfile.from_dict(data)
+
+                # 加载监控配置
+                monitors_data = await self.plugin.get_kv_data(self.KV_MONITORS, {})
+                for user_id, data in monitors_data.items():
+                    self._monitors[user_id] = ProfileMonitor.from_dict(data)
+
+                # 加载消息缓冲区
+                buffers_data = await self.plugin.get_kv_data(self.KV_BUFFERS, {})
+                for user_id, data in buffers_data.items():
+                    self._buffers[user_id] = MessageBuffer.from_dict(data)
+
+                self._loaded = True
+                logger.info(f"[lzpersona] 画像服务已加载: {len(self._profiles)} 个画像, {len(self._monitors)} 个监控")
+            except Exception as e:
+                logger.error(f"[lzpersona] 加载画像数据失败: {e}")
 
     async def save_profiles(self):
         """保存画像数据"""

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.9] - 2026-02-20
+
+### 修复
+- 🐛 **配置布尔值转换修复** - 修复 `get_bool()` 方法对字符串 `"false"` 错误返回 `True` 的问题
+  - 现在正确识别 `"true"`, `"1"`, `"yes"`, `"on"` 为 True
+- 🐛 **命令前缀兼容性修复** - 移除硬编码的 `/` 前缀正则匹配，支持任意唤醒前缀配置
+- 🐛 **回滚备份丢失修复** - 先更新人格成功后再删除备份，防止操作失败导致数据丢失
+- 🐛 **会话并发保护** - 智能入口命令现在使用会话锁防止并发操作导致状态错乱
+- 🐛 **画像服务竞态修复** - 添加异步锁保护 `load()` 方法，防止并发加载
+
+### 改进
+- ✨ **压缩结果校验增强** - 自动/手动压缩现在会检查：
+  - 空结果
+  - 长度未减少
+  - 压缩后过短（可能丢失关键信息）
+- 🔧 **命令结构调整** - 将 `/人格` 智能入口移至 `/快捷人格 智能` 子命令，避免与 AstrBot 原生命令冲突
+
+---
+
 ## [2.0.8] - 2026-02-10
 
 ### 修复

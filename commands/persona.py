@@ -160,23 +160,20 @@ class PersonaCommands:
         
         event.stop_event()
 
-    # 命令前缀正则表达式：匹配 /快捷人格|/qp|/quickpersona + 空格 + 生成人格|gen + 可选空格或换行
-    _CMD_GEN_PREFIX_RE = re.compile(
-        r'^/?(?:快捷人格|qp|quickpersona)\s+(?:生成人格|gen)[\s\n]*',
-        re.IGNORECASE
-    )
-
     async def cmd_gen(self: "QuickPersona", event: AstrMessageEvent, description: str = ""):
         """根据描述生成人格（支持引导式生成）"""
-        # 直接从原始消息中提取描述，避免命令解析器截断问题
-        raw_message = event.get_message_str().strip()
-        
-        # 使用正则表达式匹配并去除命令前缀
-        match = self._CMD_GEN_PREFIX_RE.match(raw_message)
-        if match:
-            description = raw_message[match.end():].strip()
-        else:
-            description = str(description).strip()
+        # 优先使用命令解析器传入的参数
+        description = str(description).strip()
+
+        # 如果参数为空，尝试从消息中提取（兼容多行描述）
+        if not description:
+            raw_message = event.get_message_str().strip()
+            # 查找命令关键词后的内容（不依赖特定前缀）
+            for keyword in ["生成人格", "gen"]:
+                idx = raw_message.lower().find(keyword.lower())
+                if idx != -1:
+                    description = raw_message[idx + len(keyword):].strip()
+                    break
 
         if not description:
             yield event.plain_result(
@@ -349,17 +346,24 @@ class PersonaCommands:
         max_len = self.config.max_prompt_length
         result_len = len(result)
         auto_compress = self.config.auto_compress
-        
+
         logger.debug(f"[lzpersona] 自动压缩检查: result_len={result_len}, max_len={max_len}, auto_compress={auto_compress}")
-        
+
         if result_len > max_len and auto_compress:
             yield event.plain_result(f"⚠️ 生成的提示词过长({result_len}字符，限制{max_len})，正在自动压缩...")
             compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
-            if compressed and len(compressed) < result_len:
+
+            # 增强压缩结果校验
+            if not compressed or not compressed.strip():
+                yield event.plain_result(f"⚠️ 自动压缩返回空结果，保留原始结果")
+            elif len(compressed) >= result_len:
+                yield event.plain_result(f"⚠️ 自动压缩后长度未减少({len(compressed)}字符)，保留原始结果")
+            elif len(compressed) < max_len * 0.3:
+                # 压缩后过短，可能丢失关键信息
+                yield event.plain_result(f"⚠️ 自动压缩后过短({len(compressed)}字符)，保留原始结果")
+            else:
                 result = compressed
                 yield event.plain_result(f"✅ 自动压缩完成: {result_len} → {len(result)} 字符")
-            else:
-                yield event.plain_result(f"⚠️ 自动压缩效果不佳，保留原始结果")
 
         persona_id = generate_persona_id(description)
 
@@ -416,17 +420,23 @@ class PersonaCommands:
         max_len = self.config.max_prompt_length
         result_len = len(result)
         auto_compress = self.config.auto_compress
-        
+
         logger.debug(f"[lzpersona] 快速生成自动压缩检查: result_len={result_len}, max_len={max_len}, auto_compress={auto_compress}")
-        
+
         if result_len > max_len and auto_compress:
             yield event.plain_result(f"⚠️ 生成的提示词过长({result_len}字符，限制{max_len})，正在自动压缩...")
             compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
-            if compressed and len(compressed) < result_len:
+
+            # 增强压缩结果校验
+            if not compressed or not compressed.strip():
+                yield event.plain_result(f"⚠️ 自动压缩返回空结果，保留原始结果")
+            elif len(compressed) >= result_len:
+                yield event.plain_result(f"⚠️ 自动压缩后长度未减少({len(compressed)}字符)，保留原始结果")
+            elif len(compressed) < max_len * 0.3:
+                yield event.plain_result(f"⚠️ 自动压缩后过短({len(compressed)}字符)，保留原始结果")
+            else:
                 result = compressed
                 yield event.plain_result(f"✅ 自动压缩完成: {result_len} → {len(result)} 字符")
-            else:
-                yield event.plain_result(f"⚠️ 自动压缩效果不佳，保留原始结果")
 
         persona_id = generate_persona_id(description)
 
@@ -630,16 +640,25 @@ class PersonaCommands:
                 yield event.plain_result(f"❌ 没有找到 {persona_id} 的备份")
                 return
 
-            await self.context.persona_manager.update_persona(
-                persona_id=persona_id, system_prompt=backup.system_prompt
-            )
-            self.state.backups[persona_id].pop(0)
-            await self.state.save_backups()
-
             backup_time = datetime.fromtimestamp(backup.backed_up_at).strftime("%Y-%m-%d %H:%M:%S")
+            backup_prompt = backup.system_prompt  # 保存备份内容，防止后续操作失败
+
+            # 先更新人格
+            await self.context.persona_manager.update_persona(
+                persona_id=persona_id, system_prompt=backup_prompt
+            )
+
+            # 更新成功后再删除备份并保存
+            if persona_id in self.state.backups and self.state.backups[persona_id]:
+                self.state.backups[persona_id].pop(0)
+                try:
+                    await self.state.save_backups()
+                except Exception as e:
+                    logger.warning(f"[lzpersona] 保存备份状态失败: {e}，但回滚已成功")
+
             yield event.plain_result(
                 f"✅ 已回滚到 {backup_time} 的版本\n"
-                f"📝 提示词预览: {shorten_prompt(backup.system_prompt, 200)}"
+                f"📝 提示词预览: {shorten_prompt(backup_prompt, 200)}"
             )
         except Exception as e:
             logger.error(f"[lzpersona] 回滚失败: {e}")
@@ -738,12 +757,21 @@ class PersonaCommands:
         # 使用 LLMService 高级方法
         result = await self.llm_service.shrink_persona(persona.system_prompt, intensity, PromptFormat.NATURAL, event)
 
-        if not result:
-            yield event.plain_result("❌ 压缩失败，请稍后重试")
+        if not result or not result.strip():
+            yield event.plain_result("❌ 压缩失败：返回空结果")
             return
 
         new_len = len(result)
         reduction = round((1 - new_len / original_len) * 100, 1) if original_len > 0 else 0
+
+        # 检查压缩效果
+        if new_len >= original_len:
+            yield event.plain_result(f"⚠️ 压缩后长度未减少({new_len}字符)，建议不使用此结果")
+            return
+
+        if new_len < 50:
+            yield event.plain_result(f"⚠️ 压缩后过短({new_len}字符)，可能丢失关键信息，建议不使用此结果")
+            return
 
         if self.config.confirm_before_apply:
             session.state = SessionState.WAITING_CONFIRM

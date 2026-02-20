@@ -42,7 +42,7 @@ from .utils import shorten_prompt, generate_persona_id, get_session_id
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.0.8", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.0.9", ""
 )
 class QuickPersona(Star, PersonaCommands, ProfileCommands):
     """快捷人格生成器插件
@@ -231,51 +231,53 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
             return
 
         session_id = get_session_id(event)
-        session = self.state.get_session(session_id)
+        session, lock = await self.state.acquire_session(session_id)
 
-        # 构建上下文
-        try:
-            personas = await self.persona_service.get_all_personas()
-            persona_list = ", ".join([p.persona_id for p in personas[:10]])
-            if len(personas) > 10:
-                persona_list += f" (共 {len(personas)} 个)"
-        except Exception:
-            persona_list = "无法获取"
+        # 使用会话锁防止并发操作
+        async with lock:
+            # 构建上下文
+            try:
+                personas = await self.persona_service.get_all_personas()
+                persona_list = ", ".join([p.persona_id for p in personas[:10]])
+                if len(personas) > 10:
+                    persona_list += f" (共 {len(personas)} 个)"
+            except Exception:
+                persona_list = "无法获取"
 
-        context_info = {
-            "current_persona_id": session.current_persona_id or "无",
-            "persona_list": persona_list or "无",
-            "session_state": session.state.value,
-            "has_pending": "是" if session.pending_persona else "否",
-        }
+            context_info = {
+                "current_persona_id": session.current_persona_id or "无",
+                "persona_list": persona_list or "无",
+                "session_state": session.state.value,
+                "has_pending": "是" if session.pending_persona else "否",
+            }
 
-        intent = await self.llm_service.recognize_intent(query, context_info, event)
-        action = intent.get("action", "help")
+            intent = await self.llm_service.recognize_intent(query, context_info, event)
+            action = intent.get("action", "help")
 
-        logger.info(f"[lzpersona] 智能识别: query={query}, intent={intent}")
+            logger.info(f"[lzpersona] 智能识别: query={query}, intent={intent}")
 
-        # 路由到命令
-        handlers = {
-            "generate": lambda: self.cmd_gen(event, query if not intent.get("description") else intent["description"]),
-            "refine": lambda: self.cmd_refine(event, intent.get("feedback", "") or query),
-            "shrink": lambda: self.cmd_shrink(event, intent.get("intensity", "轻度")),
-            "list": lambda: self.cmd_list(event),
-            "view": lambda: self.cmd_view(event, intent.get("persona_id", "")),
-            "activate": lambda: self.cmd_activate(event, intent.get("persona_id", "")),
-            "delete": lambda: self.cmd_delete(event, intent.get("persona_id", "")),
-            "rollback": lambda: self.cmd_rollback(event),
-            "status": lambda: self.cmd_status(event),
-            "apply": lambda: self.cmd_apply(event),
-            "cancel": lambda: self.cmd_cancel(event),
-        }
+            # 路由到命令（在锁保护下执行）
+            handlers = {
+                "generate": lambda: self.cmd_gen(event, query if not intent.get("description") else intent["description"]),
+                "refine": lambda: self.cmd_refine(event, intent.get("feedback", "") or query),
+                "shrink": lambda: self.cmd_shrink(event, intent.get("intensity", "轻度")),
+                "list": lambda: self.cmd_list(event),
+                "view": lambda: self.cmd_view(event, intent.get("persona_id", "")),
+                "activate": lambda: self.cmd_activate(event, intent.get("persona_id", "")),
+                "delete": lambda: self.cmd_delete(event, intent.get("persona_id", "")),
+                "rollback": lambda: self.cmd_rollback(event),
+                "status": lambda: self.cmd_status(event),
+                "apply": lambda: self.cmd_apply(event),
+                "cancel": lambda: self.cmd_cancel(event),
+            }
 
-        handler = handlers.get(action)
-        if handler:
-            async for r in handler():
-                yield r
-        else:
-            async for r in self.cmd_help(event):
-                yield r
+            handler = handlers.get(action)
+            if handler:
+                async for r in handler():
+                    yield r
+            else:
+                async for r in self.cmd_help(event):
+                    yield r
 
         event.stop_event()
 
