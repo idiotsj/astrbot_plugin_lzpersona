@@ -16,8 +16,8 @@ from ..core import (
     PERSONA_PREFIX,
     SessionState,
     PendingPersona,
-    PromptFormat,
     parse_format,
+    detect_prompt_format,
     get_format_display_name,
 )
 from ..utils import shorten_prompt, generate_persona_id, get_session_id
@@ -35,6 +35,64 @@ class PersonaCommands:
 
     # ==================== 命令组定义 ====================
     # 注意：命令组装饰器需要在主类中应用
+
+    async def _auto_compress_if_needed(
+        self: "QuickPersona",
+        event: AstrMessageEvent,
+        prompt: str,
+        format_type,
+        stage_label: str,
+    ) -> tuple[str, list[str], bool, int, bool]:
+        """在结果超长时尝试自动压缩，并返回提示信息。"""
+        max_len = max(1, int(self.config.max_prompt_length))
+        result = prompt or ""
+        result_len = len(result)
+        auto_compress = self.config.auto_compress
+        notices: list[str] = []
+        compressed_applied = False
+
+        logger.debug(
+            f"[lzpersona] {stage_label}自动压缩检查: "
+            f"result_len={result_len}, max_len={max_len}, auto_compress={auto_compress}"
+        )
+
+        if result_len > max_len and auto_compress:
+            notices.append(
+                f"⚠️ {stage_label}过长({result_len}字符，限制{max_len})，正在自动压缩..."
+            )
+            compressed = await self.llm_service.shrink_persona(
+                result, "轻度", format_type, event
+            )
+
+            if not compressed or not compressed.strip():
+                notices.append("⚠️ 自动压缩返回空结果，保留原始结果")
+            elif len(compressed) >= result_len:
+                notices.append(
+                    f"⚠️ 自动压缩后长度未减少({len(compressed)}字符)，保留原始结果"
+                )
+            elif len(compressed) < max_len * 0.3:
+                notices.append(
+                    f"⚠️ 自动压缩后过短({len(compressed)}字符)，保留原始结果"
+                )
+            else:
+                result = compressed
+                compressed_applied = True
+                notices.append(
+                    f"✅ 自动压缩完成: {result_len} → {len(result)} 字符"
+                )
+        elif result_len > max_len:
+            notices.append(
+                f"⚠️ {stage_label}长度为 {result_len} 字符，已超过限制 {max_len}，且未开启自动压缩"
+            )
+
+        within_limit = len(result) <= max_len
+        if not within_limit:
+            notices.append(
+                f"⚠️ 当前结果仍超出长度限制({len(result)}/{max_len})，"
+                "建议继续使用 /快捷人格 压缩人格"
+            )
+
+        return result, notices, within_limit, result_len, compressed_applied
 
     async def cmd_help(self: "QuickPersona", event: AstrMessageEvent):
         """显示帮助信息"""
@@ -167,7 +225,7 @@ class PersonaCommands:
 
         # 如果参数为空，尝试从消息中提取（兼容多行描述）
         if not description:
-            raw_message = event.get_message_str().strip()
+            raw_message = (event.get_message_str() or "").strip()
             # 查找命令关键词后的内容（不依赖特定前缀）
             for keyword in ["生成人格", "gen"]:
                 idx = raw_message.lower().find(keyword.lower())
@@ -332,8 +390,9 @@ class PersonaCommands:
         supplements: str, auto_generate_fields: list, session
     ):
         """根据补充信息生成人格"""
+        target_format = self.config.default_format
         result = await self.llm_service.generate_with_supplements(
-            description, supplements, auto_generate_fields, event
+            description, supplements, auto_generate_fields, event, target_format
         )
 
         if not result:
@@ -342,28 +401,11 @@ class PersonaCommands:
             yield event.plain_result("❌ 生成失败，请检查 LLM 配置或稍后重试")
             return
 
-        # 自动压缩（仅当超过限制时）
-        max_len = self.config.max_prompt_length
-        result_len = len(result)
-        auto_compress = self.config.auto_compress
-
-        logger.debug(f"[lzpersona] 自动压缩检查: result_len={result_len}, max_len={max_len}, auto_compress={auto_compress}")
-
-        if result_len > max_len and auto_compress:
-            yield event.plain_result(f"⚠️ 生成的提示词过长({result_len}字符，限制{max_len})，正在自动压缩...")
-            compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
-
-            # 增强压缩结果校验
-            if not compressed or not compressed.strip():
-                yield event.plain_result(f"⚠️ 自动压缩返回空结果，保留原始结果")
-            elif len(compressed) >= result_len:
-                yield event.plain_result(f"⚠️ 自动压缩后长度未减少({len(compressed)}字符)，保留原始结果")
-            elif len(compressed) < max_len * 0.3:
-                # 压缩后过短，可能丢失关键信息
-                yield event.plain_result(f"⚠️ 自动压缩后过短({len(compressed)}字符)，保留原始结果")
-            else:
-                result = compressed
-                yield event.plain_result(f"✅ 自动压缩完成: {result_len} → {len(result)} 字符")
+        result, notices, within_limit, original_len, compressed_applied = await self._auto_compress_if_needed(
+            event, result, target_format, "生成结果"
+        )
+        for notice in notices:
+            yield event.plain_result(notice)
 
         persona_id = generate_persona_id(description)
 
@@ -380,8 +422,23 @@ class PersonaCommands:
                 event, icon="🎭", title="人格生成完成",
                 subtitle="模式: 引导式生成 | 待确认",
                 content=result,
-                meta_info={"人格ID": persona_id, "字符数": str(len(result))},
-                footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+                meta_info={
+                    "人格ID": persona_id,
+                    "字符数": str(len(result)),
+                    "格式": get_format_display_name(target_format),
+                } | (
+                    {
+                        "原始长度": str(original_len),
+                        "自动压缩": "是",
+                    }
+                    if compressed_applied
+                    else {}
+                ),
+                footer=(
+                    "发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+                    if within_limit
+                    else "可继续 /快捷人格 压缩人格，或确认后再手动调整"
+                )
             ):
                 yield r
         else:
@@ -394,49 +451,50 @@ class PersonaCommands:
                 session.pending_persona = None
                 session.current_persona_id = persona_id
                 async for r in self.render.render_persona_card(
-                    event, icon="✅", title="人格已创建并应用",
+                    event, icon="✅", title="人格已创建并选中",
                     subtitle="模式: 引导式生成",
                     content=result,
-                    meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                    meta_info={
+                        "人格ID": persona_id,
+                        "字符数": str(len(result)),
+                        "格式": get_format_display_name(target_format),
+                    } | (
+                        {
+                            "原始长度": str(original_len),
+                            "自动压缩": "是",
+                        }
+                        if compressed_applied
+                        else {}
+                    ),
+                    footer=(
+                        "使用 /快捷人格 应用人格 让 AI 使用此人格"
+                        if within_limit
+                        else "当前结果仍超限；可先 /快捷人格 压缩人格，再 /快捷人格 应用人格"
+                    ),
                 ):
                     yield r
             else:
                 session.state = SessionState.IDLE
                 session.pending_persona = None
-                yield event.plain_result("❌ 应用人格失败，请查看日志")
+                yield event.plain_result("❌ 保存人格失败，请查看日志")
 
     async def _quick_generation(self: "QuickPersona", event: AstrMessageEvent, description: str, session):
         """快速生成流程（使用 LLMService 高级方法）"""
         yield event.plain_result(f"🔄 正在根据描述生成人格...\n描述: {description}")
 
         # 使用 LLMService 高级方法
-        result = await self.llm_service.generate_persona(description, event, PromptFormat.NATURAL)
+        target_format = self.config.default_format
+        result = await self.llm_service.generate_persona(description, event, target_format)
 
         if not result:
             yield event.plain_result("❌ 生成失败，请检查 LLM 配置或稍后重试")
             return
 
-        # 自动压缩（仅当超过限制时）
-        max_len = self.config.max_prompt_length
-        result_len = len(result)
-        auto_compress = self.config.auto_compress
-
-        logger.debug(f"[lzpersona] 快速生成自动压缩检查: result_len={result_len}, max_len={max_len}, auto_compress={auto_compress}")
-
-        if result_len > max_len and auto_compress:
-            yield event.plain_result(f"⚠️ 生成的提示词过长({result_len}字符，限制{max_len})，正在自动压缩...")
-            compressed = await self.llm_service.shrink_persona(result, "轻度", PromptFormat.NATURAL, event)
-
-            # 增强压缩结果校验
-            if not compressed or not compressed.strip():
-                yield event.plain_result(f"⚠️ 自动压缩返回空结果，保留原始结果")
-            elif len(compressed) >= result_len:
-                yield event.plain_result(f"⚠️ 自动压缩后长度未减少({len(compressed)}字符)，保留原始结果")
-            elif len(compressed) < max_len * 0.3:
-                yield event.plain_result(f"⚠️ 自动压缩后过短({len(compressed)}字符)，保留原始结果")
-            else:
-                result = compressed
-                yield event.plain_result(f"✅ 自动压缩完成: {result_len} → {len(result)} 字符")
+        result, notices, within_limit, original_len, compressed_applied = await self._auto_compress_if_needed(
+            event, result, target_format, "生成结果"
+        )
+        for notice in notices:
+            yield event.plain_result(notice)
 
         persona_id = generate_persona_id(description)
 
@@ -453,8 +511,23 @@ class PersonaCommands:
                 event, icon="🎭", title="人格生成完成",
                 subtitle="模式: 快速生成 | 待确认",
                 content=result,
-                meta_info={"人格ID": persona_id, "字符数": str(len(result))},
-                footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+                meta_info={
+                    "人格ID": persona_id,
+                    "字符数": str(len(result)),
+                    "格式": get_format_display_name(target_format),
+                } | (
+                    {
+                        "原始长度": str(original_len),
+                        "自动压缩": "是",
+                    }
+                    if compressed_applied
+                    else {}
+                ),
+                footer=(
+                    "发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+                    if within_limit
+                    else "可继续 /快捷人格 压缩人格，或确认后再手动调整"
+                )
             ):
                 yield r
         else:
@@ -463,16 +536,36 @@ class PersonaCommands:
                 persona_id, result, backup=False, user_name=user_name
             )
             if success:
+                session.state = SessionState.IDLE
+                session.pending_persona = None
                 session.current_persona_id = persona_id
                 async for r in self.render.render_persona_card(
-                    event, icon="✅", title="人格已创建并应用",
+                    event, icon="✅", title="人格已创建并选中",
                     subtitle="模式: 快速生成",
                     content=result,
-                    meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                    meta_info={
+                        "人格ID": persona_id,
+                        "字符数": str(len(result)),
+                        "格式": get_format_display_name(target_format),
+                    } | (
+                        {
+                            "原始长度": str(original_len),
+                            "自动压缩": "是",
+                        }
+                        if compressed_applied
+                        else {}
+                    ),
+                    footer=(
+                        "使用 /快捷人格 应用人格 让 AI 使用此人格"
+                        if within_limit
+                        else "当前结果仍超限；可先 /快捷人格 压缩人格，再 /快捷人格 应用人格"
+                    ),
                 ):
                     yield r
             else:
-                yield event.plain_result("❌ 应用人格失败，请查看日志")
+                session.state = SessionState.IDLE
+                session.pending_persona = None
+                yield event.plain_result("❌ 保存人格失败，请查看日志")
 
     async def cmd_apply(self: "QuickPersona", event: AstrMessageEvent):
         """确认并保存待确认的人格"""
@@ -699,11 +792,18 @@ class PersonaCommands:
             yield event.plain_result(f"🔄 正在根据反馈优化人格...\n反馈: {feedback}")
 
         # 使用 LLMService 高级方法
-        result = await self.llm_service.refine_persona(current_prompt, feedback, PromptFormat.NATURAL, event)
+        current_format = detect_prompt_format(current_prompt, self.config.default_format)
+        result = await self.llm_service.refine_persona(current_prompt, feedback, current_format, event)
 
         if not result:
             yield event.plain_result("❌ 优化失败，请稍后重试")
             return
+
+        result, notices, within_limit, original_len, compressed_applied = await self._auto_compress_if_needed(
+            event, result, current_format, "优化结果"
+        )
+        for notice in notices:
+            yield event.plain_result(notice)
 
         if self.config.confirm_before_apply:
             session.state = SessionState.WAITING_CONFIRM
@@ -715,47 +815,100 @@ class PersonaCommands:
             async for r in self.render.render_persona_card(
                 event, icon="✨", title=f"人格优化完成{status_hint}",
                 subtitle="模式: 优化 | 待确认", content=result,
-                meta_info={"人格ID": persona_id, "字符数": str(len(result))},
-                footer="可继续发送反馈优化，或 /快捷人格 确认生成"
+                meta_info={
+                    "人格ID": persona_id,
+                    "字符数": str(len(result)),
+                    "格式": get_format_display_name(current_format),
+                } | (
+                    {
+                        "原始长度": str(original_len),
+                        "自动压缩": "是",
+                    }
+                    if compressed_applied
+                    else {}
+                ),
+                footer=(
+                    "可继续发送反馈优化，或 /快捷人格 确认生成"
+                    if within_limit
+                    else "可继续反馈优化，或先 /快捷人格 压缩人格"
+                )
             ):
                 yield r
         else:
             user_name = event.get_sender_name() or "User"
             success = await self.persona_service.create_or_update(persona_id, result, backup=True, user_name=user_name)
             if success:
+                session.state = SessionState.IDLE
+                session.pending_persona = None
                 async for r in self.render.render_persona_card(
                     event, icon="✅", title="人格已优化", subtitle="模式: 优化",
-                    content=result, meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+                    content=result,
+                    meta_info={
+                        "人格ID": persona_id,
+                        "字符数": str(len(result)),
+                        "格式": get_format_display_name(current_format),
+                    } | (
+                        {
+                            "原始长度": str(original_len),
+                            "自动压缩": "是",
+                        }
+                        if compressed_applied
+                        else {}
+                    ),
+                    footer=(
+                        "使用 /快捷人格 应用人格 让 AI 使用此人格"
+                        if within_limit
+                        else "当前结果仍超限；可继续 /快捷人格 压缩人格"
+                    ),
                 ):
                     yield r
             else:
-                yield event.plain_result("❌ 应用失败，请查看日志")
+                yield event.plain_result("❌ 保存失败，请查看日志")
 
     async def cmd_shrink(self: "QuickPersona", event: AstrMessageEvent, intensity: str = "轻度"):
         """压缩人格提示词"""
         session_id = get_session_id(event)
         session = self.state.get_session(session_id)
-        persona_id = session.current_persona_id
+        is_pending = False
 
-        if not persona_id:
-            yield event.plain_result("请先使用 /快捷人格 选择人格 <人格ID> 选择一个人格")
-            return
+        if session.state == SessionState.WAITING_CONFIRM and session.pending_persona:
+            persona_id = session.pending_persona.persona_id
+            current_prompt = session.pending_persona.system_prompt
+            is_pending = True
+            yield event.plain_result(
+                f"🔄 正在压缩待确认的人格...\n📌 人格ID: {persona_id}"
+            )
+        else:
+            persona_id = session.current_persona_id
 
-        try:
-            persona = await self.persona_service.get_persona(persona_id)
-        except ValueError:
-            yield event.plain_result(f"❌ 未找到人格: {persona_id}")
-            return
+            if not persona_id:
+                yield event.plain_result("请先使用 /快捷人格 选择人格 <人格ID> 选择一个人格")
+                return
+
+            try:
+                persona = await self.persona_service.get_persona(persona_id)
+                current_prompt = persona.system_prompt
+            except ValueError:
+                yield event.plain_result(f"❌ 未找到人格: {persona_id}")
+                return
 
         valid_intensities = ["轻度", "中度", "极限"]
         if intensity not in valid_intensities:
             intensity = "轻度"
 
-        original_len = len(persona.system_prompt)
-        yield event.plain_result(f"🔄 正在压缩人格提示词...\n原始长度: {original_len}字符\n压缩强度: {intensity}")
+        original_len = len(current_prompt)
+        if not is_pending:
+            yield event.plain_result(
+                f"🔄 正在压缩人格提示词...\n原始长度: {original_len}字符\n压缩强度: {intensity}"
+            )
+        else:
+            yield event.plain_result(
+                f"📝 当前待确认版本长度: {original_len}字符\n压缩强度: {intensity}"
+            )
 
         # 使用 LLMService 高级方法
-        result = await self.llm_service.shrink_persona(persona.system_prompt, intensity, PromptFormat.NATURAL, event)
+        current_format = detect_prompt_format(current_prompt, self.config.default_format)
+        result = await self.llm_service.shrink_persona(current_prompt, intensity, current_format, event)
 
         if not result or not result.strip():
             yield event.plain_result("❌ 压缩失败：返回空结果")
@@ -773,29 +926,57 @@ class PersonaCommands:
             yield event.plain_result(f"⚠️ 压缩后过短({new_len}字符)，可能丢失关键信息，建议不使用此结果")
             return
 
+        if new_len > self.config.max_prompt_length:
+            yield event.plain_result(
+                f"⚠️ 压缩后仍超出长度限制({new_len}/{self.config.max_prompt_length})，"
+                "可继续压缩或提高强度"
+            )
+
         if self.config.confirm_before_apply:
             session.state = SessionState.WAITING_CONFIRM
             session.pending_persona = PendingPersona(
                 persona_id=persona_id, system_prompt=result,
-                created_at=time.time(), mode="shrink", original_prompt=persona.system_prompt,
+                created_at=time.time(), mode="shrink", original_prompt=current_prompt,
             )
             async for r in self.render.render_persona_card(
-                event, icon="📦", title="压缩完成", subtitle=f"强度: {intensity} | 待确认",
-                content=result, meta_info={"人格ID": persona_id, "压缩效果": f"{original_len} → {new_len} 字符", "减少比例": f"{reduction}%"},
-                footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+                event,
+                icon="📦",
+                title="压缩完成（已更新待确认人格）" if is_pending else "压缩完成",
+                subtitle=f"强度: {intensity} | 待确认",
+                content=result,
+                meta_info={
+                    "人格ID": persona_id,
+                    "压缩效果": f"{original_len} → {new_len} 字符",
+                    "减少比例": f"{reduction}%",
+                    "格式": get_format_display_name(current_format),
+                },
+                footer=(
+                    "可继续 /快捷人格 优化人格，或 /快捷人格 确认生成"
+                    if is_pending
+                    else "发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
+                )
             ):
                 yield r
         else:
             user_name = event.get_sender_name() or "User"
             success = await self.persona_service.create_or_update(persona_id, result, backup=True, user_name=user_name)
             if success:
+                session.state = SessionState.IDLE
+                session.pending_persona = None
                 async for r in self.render.render_persona_card(
-                    event, icon="✅", title="压缩完成并已应用", subtitle=f"强度: {intensity}",
-                    content=result, meta_info={"人格ID": persona_id, "压缩效果": f"{original_len} → {new_len} 字符", "减少比例": f"{reduction}%"},
+                    event, icon="✅", title="压缩完成并已保存", subtitle=f"强度: {intensity}",
+                    content=result,
+                    meta_info={
+                        "人格ID": persona_id,
+                        "压缩效果": f"{original_len} → {new_len} 字符",
+                        "减少比例": f"{reduction}%",
+                        "格式": get_format_display_name(current_format),
+                    },
+                    footer="使用 /快捷人格 应用人格 让 AI 使用此人格",
                 ):
                     yield r
             else:
-                yield event.plain_result("❌ 应用失败，请查看日志")
+                yield event.plain_result("❌ 保存失败，请查看日志")
 
     async def cmd_use(self: "QuickPersona", event: AstrMessageEvent, persona_id: str = ""):
         """选择一个人格"""
@@ -912,10 +1093,17 @@ class PersonaCommands:
             return
 
         target = parse_format(target_format)
+        source = detect_prompt_format(current_prompt, self.config.default_format)
         target_name = get_format_display_name(target)
+        source_name = get_format_display_name(source)
+
+        if source == target:
+            yield event.plain_result(f"当前人格已经是 {target_name} 格式，无需转换")
+            return
+
         yield event.plain_result(f"🔄 正在将人格转换为 {target_name} 格式...")
 
-        result = await self.llm_service.convert_format(current_prompt, PromptFormat.NATURAL, target, event)
+        result = await self.llm_service.convert_format(current_prompt, source, target, event)
         if not result:
             yield event.plain_result("❌ 格式转换失败")
             return
@@ -929,7 +1117,12 @@ class PersonaCommands:
         async for r in self.render.render_persona_card(
             event, icon="🔄", title="格式转换完成",
             subtitle=f"目标格式: {target_name} | 待确认", content=result,
-            meta_info={"人格ID": persona_id, "字符数": str(len(result))},
+            meta_info={
+                "人格ID": persona_id,
+                "字符数": str(len(result)),
+                "源格式": source_name,
+                "目标格式": target_name,
+            },
             footer="发送 /快捷人格 确认生成 或 /快捷人格 取消操作"
         ):
             yield r

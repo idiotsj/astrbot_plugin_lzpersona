@@ -1,7 +1,7 @@
 name: astrbot_plugin_lzpersona
 display_name: LZ快捷人格生成器
 desc: AI 驱动的人格生成、优化、画像工具。通过简单描述生成人格，智能优化提示词，与 AstrBot 原生 Persona 系统无缝集成。
-version: v2.0.9
+version: v2.1.0
 author: SJ
 repo: https://github.com/idiotsj/astrbot_plugin_lzpersona/tree/main
 help: |
@@ -27,14 +27,16 @@ help: |
   ======== 用户画像功能 ========
   
   /画像 帮助                    - 显示画像功能帮助
-  /画像 添加监控 <用户ID> [模式] - 添加画像监控 (global/group)
-  /画像 移除监控 <用户ID>       - 移除画像监控
+  /画像 添加监控 <用户ID/@用户> [模式] - 添加画像监控 (群聊默认当前群)
+  /画像 移除监控 <用户ID/@用户> [范围] - 移除画像监控 (current/all)
   /画像 监控列表                - 查看所有监控配置
-  /画像 查看 <用户ID>           - 查看用户画像
+  /画像 查看 <用户ID/@用户>     - 查看用户画像
   /画像 列表                    - 查看所有画像
-  /画像 强制更新 <用户ID>       - 立即更新画像
-  /画像 删除 <用户ID>           - 删除用户画像
+  /画像 强制更新 <用户ID/@用户> - 立即更新画像
+  /画像 删除 <用户ID/@用户>     - 删除用户画像
+  /画像 缓冲状态 <用户ID/@用户> - 查看消息缓冲区状态
   
   别名: /profile 或 /pf
   
   注意: 用户画像功能需要在配置中启用 profile_enabled
+  群聊中推荐直接 @用户，默认仅监控当前群

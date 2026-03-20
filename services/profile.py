@@ -55,6 +55,8 @@ class ProfileService:
         self._loaded = False
         # 加载锁，防止并发加载
         self._load_lock = asyncio.Lock()
+        # 用户级别锁，防止同一用户缓冲区并发更新时丢消息
+        self._user_locks: Dict[str, asyncio.Lock] = {}
 
         # 配置（延迟获取，避免初始化时 config_service 还未就绪）
         self._min_messages_for_update: Optional[int] = None
@@ -120,6 +122,12 @@ class ProfileService:
             self._include_bot_replies = self._get_config_bool("profile_include_bot", True)
         return self._include_bot_replies
 
+    def _get_user_lock(self, user_id: str) -> asyncio.Lock:
+        """获取用户级别锁。"""
+        if user_id not in self._user_locks:
+            self._user_locks[user_id] = asyncio.Lock()
+        return self._user_locks[user_id]
+
     async def load(self):
         """从 KV 存储加载数据"""
         # 使用锁防止并发加载
@@ -183,15 +191,43 @@ class ProfileService:
     ) -> ProfileMonitor:
         """添加用户画像监控"""
         await self.load()
-        
-        monitor = ProfileMonitor(
-            user_id=user_id,
-            mode=mode,
-            group_ids=group_ids or [],
-            enabled=True,
-            created_at=time.time(),
-            created_by=created_by,
-        )
+
+        normalized_group_ids = list(dict.fromkeys(str(gid).strip() for gid in (group_ids or []) if str(gid).strip()))
+        existing = self._monitors.get(user_id)
+
+        if existing:
+            created_at = existing.created_at or time.time()
+            owner = existing.created_by or created_by
+
+            if mode == ProfileMode.GLOBAL or existing.mode == ProfileMode.GLOBAL:
+                monitor = ProfileMonitor(
+                    user_id=user_id,
+                    mode=ProfileMode.GLOBAL,
+                    group_ids=[],
+                    enabled=True,
+                    created_at=created_at,
+                    created_by=owner,
+                )
+            else:
+                merged_group_ids = list(dict.fromkeys(existing.group_ids + normalized_group_ids))
+                monitor = ProfileMonitor(
+                    user_id=user_id,
+                    mode=ProfileMode.GROUP,
+                    group_ids=merged_group_ids,
+                    enabled=True,
+                    created_at=created_at,
+                    created_by=owner,
+                )
+        else:
+            monitor = ProfileMonitor(
+                user_id=user_id,
+                mode=mode,
+                group_ids=normalized_group_ids,
+                enabled=True,
+                created_at=time.time(),
+                created_by=created_by,
+            )
+
         self._monitors[user_id] = monitor
         await self.save_monitors()
         
@@ -207,19 +243,46 @@ class ProfileService:
         if user_id not in self._buffers:
             self._buffers[user_id] = MessageBuffer(user_id=user_id)
         
-        logger.info(f"[lzpersona] 添加画像监控: {user_id}, 模式: {mode.value}")
+        logger.info(f"[lzpersona] 添加画像监控: {user_id}, 模式: {monitor.mode.value}")
         return monitor
 
     async def remove_monitor(self, user_id: str) -> bool:
         """移除画像监控"""
+        result = await self.remove_monitor_scope(user_id)
+        return result in {"removed", "removed_group"}
+
+    async def remove_monitor_scope(self, user_id: str, group_id: str = "") -> str:
+        """移除画像监控范围。
+
+        Returns:
+            removed: 已删除整个监控配置
+            removed_group: 仅移除了当前群的监控范围
+            group_not_found: 监控存在，但当前群不在范围内
+            not_found: 不存在监控配置
+        """
         await self.load()
-        
-        if user_id in self._monitors:
-            del self._monitors[user_id]
-            await self.save_monitors()
-            logger.info(f"[lzpersona] 移除画像监控: {user_id}")
-            return True
-        return False
+
+        monitor = self._monitors.get(user_id)
+        if not monitor:
+            return "not_found"
+
+        normalized_group_id = str(group_id).strip()
+        if monitor.mode == ProfileMode.GROUP and normalized_group_id:
+            if normalized_group_id not in monitor.group_ids:
+                return "group_not_found"
+
+            remaining_groups = [gid for gid in monitor.group_ids if gid != normalized_group_id]
+            if remaining_groups:
+                monitor.group_ids = remaining_groups
+                self._monitors[user_id] = monitor
+                await self.save_monitors()
+                logger.info(f"[lzpersona] 移除画像监控范围: {user_id}, 群: {normalized_group_id}")
+                return "removed_group"
+
+        del self._monitors[user_id]
+        await self.save_monitors()
+        logger.info(f"[lzpersona] 移除画像监控: {user_id}")
+        return "removed"
 
     async def get_monitor(self, user_id: str) -> Optional[ProfileMonitor]:
         """获取监控配置"""
@@ -264,42 +327,64 @@ class ProfileService:
             是否触发了画像更新
         """
         await self.load()
-        
-        # 检查是否在监控列表中
-        if not await self.is_monitored(user_id, group_id):
-            return False
-        
-        # 添加到缓冲区
-        if user_id not in self._buffers:
-            self._buffers[user_id] = MessageBuffer(user_id=user_id)
-        
-        buffer = self._buffers[user_id]
-        buffer.add_message(content, group_id, nickname)
-        
-        # 更新昵称
-        if nickname and user_id in self._profiles:
-            self._profiles[user_id].nickname = nickname
-        
-        # 检查是否需要刷新（使用属性获取配置值）
-        if buffer.should_flush(self.min_messages_for_update, self.max_buffer_age):
-            await self._update_profile(user_id, event)
+
+        flush_messages: Optional[List[Dict[str, Any]]] = None
+        user_lock = self._get_user_lock(user_id)
+
+        async with user_lock:
+            monitor = self._monitors.get(user_id)
+            if not monitor or not monitor.enabled:
+                return False
+            if monitor.mode == ProfileMode.GROUP and group_id not in monitor.group_ids:
+                return False
+
+            if user_id not in self._buffers:
+                self._buffers[user_id] = MessageBuffer(user_id=user_id)
+
+            buffer = self._buffers[user_id]
+            buffer.add_message(content, group_id, nickname)
+
+            if nickname and user_id in self._profiles:
+                self._profiles[user_id].nickname = nickname
+
+            if buffer.should_flush(self.min_messages_for_update, self.max_buffer_age):
+                flush_messages = buffer.flush()
+                await self.save_buffers()
+            elif len(buffer.messages) % 5 == 0:
+                await self.save_buffers()
+
+        if flush_messages:
+            await self._update_profile_batch(user_id, flush_messages, event)
             return True
-        
-        # 定期保存缓冲区
-        if len(buffer.messages) % 5 == 0:
-            await self.save_buffers()
-        
+
         return False
 
-    async def _update_profile(self, user_id: str, event: "AstrMessageEvent" = None):
-        """更新用户画像"""
-        buffer = self._buffers.get(user_id)
-        if not buffer or not buffer.messages:
+    async def _restore_messages(self, user_id: str, messages: List[Dict[str, Any]]) -> None:
+        """将失败批次恢复到缓冲区头部，避免新旧消息交错时丢失内容。"""
+        if not messages:
             return
-        
-        messages = buffer.flush()
-        await self.save_buffers()
-        
+
+        user_lock = self._get_user_lock(user_id)
+        async with user_lock:
+            buffer = self._buffers.setdefault(user_id, MessageBuffer(user_id=user_id))
+            buffer.messages = list(messages) + buffer.messages
+            oldest_ts = min(
+                (msg.get("timestamp", time.time()) for msg in messages),
+                default=time.time(),
+            )
+            buffer.last_flush = min(buffer.last_flush, oldest_ts)
+            await self.save_buffers()
+
+    async def _update_profile_batch(
+        self,
+        user_id: str,
+        messages: List[Dict[str, Any]],
+        event: "AstrMessageEvent" = None,
+    ):
+        """更新用户画像。"""
+        if not messages:
+            return
+
         profile = self._profiles.get(user_id)
         if not profile:
             profile = UserProfile(user_id=user_id, created_at=time.time())
@@ -323,26 +408,26 @@ class ProfileService:
                 # 初始化
                 nickname = messages[0].get("nickname", "") if messages else ""
                 result = await self._call_llm_init(user_id, nickname, messages_text, context_text, event)
-            
-            if result:
-                # 更新画像
-                profile.profile_text = result.get("profile_text", profile.profile_text)
-                profile.traits = result.get("traits", profile.traits)
-                profile.interests = result.get("interests", profile.interests)
-                profile.speaking_style = result.get("speaking_style", profile.speaking_style)
-                profile.emotional_tendency = result.get("emotional_tendency", profile.emotional_tendency)
-                profile.message_count += len(messages)
-                profile.last_updated = time.time()
-                
-                await self.save_profiles()
-                logger.info(f"[lzpersona] 画像已更新: {user_id}, 累计消息: {profile.message_count}")
+
+            if not result:
+                logger.warning(f"[lzpersona] 画像更新未返回有效结果，已恢复消息缓冲区: {user_id}")
+                await self._restore_messages(user_id, messages)
+                return
+
+            # 更新画像
+            profile.profile_text = result.get("profile_text", profile.profile_text)
+            profile.traits = result.get("traits", profile.traits)
+            profile.interests = result.get("interests", profile.interests)
+            profile.speaking_style = result.get("speaking_style", profile.speaking_style)
+            profile.emotional_tendency = result.get("emotional_tendency", profile.emotional_tendency)
+            profile.message_count += len(messages)
+            profile.last_updated = time.time()
+
+            await self.save_profiles()
+            logger.info(f"[lzpersona] 画像已更新: {user_id}, 累计消息: {profile.message_count}")
         except Exception as e:
             logger.error(f"[lzpersona] 更新画像失败: {e}")
-            # 将消息放回缓冲区并保存（使用 extend 保持顺序，避免重复）
-            # 注意：只有在缓冲区为空时才放回，防止多次失败导致重复
-            if not buffer.messages:
-                buffer.messages.extend(messages)
-            await self.save_buffers()
+            await self._restore_messages(user_id, messages)
 
     async def _get_conversation_context(
         self, 
@@ -577,6 +662,10 @@ class ProfileService:
         parsed = _extract_json_object(result)
         if parsed is None:
             logger.warning(f"[lzpersona] 画像解析失败, 原文: {result[:200]}...")
+            return None
+        if not isinstance(parsed, dict):
+            logger.warning(f"[lzpersona] 画像解析结果不是对象: {type(parsed).__name__}")
+            return None
         return parsed
 
     # ==================== 画像查询 ====================
@@ -614,12 +703,17 @@ class ProfileService:
     async def force_update(self, user_id: str, event: "AstrMessageEvent" = None) -> bool:
         """强制更新画像（刷新当前缓冲区）"""
         await self.load()
-        
-        buffer = self._buffers.get(user_id)
-        if not buffer or not buffer.messages:
-            return False
-        
-        await self._update_profile(user_id, event)
+
+        user_lock = self._get_user_lock(user_id)
+        async with user_lock:
+            buffer = self._buffers.get(user_id)
+            if not buffer or not buffer.messages:
+                return False
+
+            flush_messages = buffer.flush()
+            await self.save_buffers()
+
+        await self._update_profile_batch(user_id, flush_messages, event)
         return True
 
     async def get_buffer_status(self, user_id: str) -> Dict:

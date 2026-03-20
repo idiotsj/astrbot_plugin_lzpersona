@@ -105,13 +105,22 @@ class LLMService:
         """获取架构师模型 Provider ID"""
         return str(self._get_cfg("architect_provider_id", "") or "")
 
+    def _get_cfg_int(self, key: str, default: int) -> int:
+        """获取整数配置，配置异常时回退默认值。"""
+        value = self._get_cfg(key, default)
+        try:
+            return int(value) if value is not None else default
+        except (TypeError, ValueError):
+            logger.warning(f"[lzpersona] 配置 {key}={value!r} 非法，使用默认值 {default}")
+            return default
+
     def _get_architect_timeout(self) -> int:
         """获取架构师超时时间"""
-        return int(self._get_cfg("architect_timeout", 60) or 60)
+        return max(1, self._get_cfg_int("architect_timeout", 60))
 
     def _get_max_retries(self) -> int:
         """获取最大重试次数"""
-        return int(self._get_cfg("llm_max_retries", 2) or 2)
+        return max(0, self._get_cfg_int("llm_max_retries", 2))
 
     async def call_architect(
         self, prompt: str, event: "AstrMessageEvent"
@@ -130,9 +139,15 @@ class LLMService:
         max_retries = self._get_max_retries()
 
         # 获取 Provider
+        provider = None
         if provider_id:
             provider = self.context.get_provider_by_id(provider_id)
-        else:
+            if not provider:
+                logger.warning(
+                    f"[lzpersona] 未找到配置的架构师 Provider({provider_id})，回退到当前会话 Provider"
+                )
+
+        if not provider:
             provider = self.context.get_using_provider(
                 umo=event.unified_msg_origin if event else None
             )

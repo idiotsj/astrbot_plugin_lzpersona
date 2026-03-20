@@ -13,7 +13,7 @@ from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import At, Plain, Reply
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.star.star_tools import StarTools
@@ -42,7 +42,7 @@ from .utils import shorten_prompt, generate_persona_id, get_session_id
 
 
 @register(
-    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.0.9", ""
+    "astrbot_plugin_lzpersona", "idiotsj", "LZ快捷人格生成器 - AI 驱动的人格管理工具", "2.1.0", ""
 )
 class QuickPersona(Star, PersonaCommands, ProfileCommands):
     """快捷人格生成器插件
@@ -143,16 +143,27 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
             logger.warning(f"[lzpersona] 读取 KV 数据失败 ({key}): {e}")
             return default if default is not None else {}
 
-    async def put_kv_data(self, key: str, data: Any) -> bool:
+    async def put_kv_data(self, key: str, value: Any) -> bool:
         """保存数据到持久化存储"""
         try:
             import json
             file_path = self.data_dir / f"{key}.json"
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(value, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
             logger.error(f"[lzpersona] 保存 KV 数据失败 ({key}): {e}")
+            return False
+
+    async def delete_kv_data(self, key: str) -> bool:
+        """删除持久化存储中的数据"""
+        try:
+            file_path = self.data_dir / f"{key}.json"
+            if file_path.exists():
+                file_path.unlink()
+            return True
+        except Exception as e:
+            logger.error(f"[lzpersona] 删除 KV 数据失败 ({key}): {e}")
             return False
 
     # ==================== 渲染辅助（委托给 RenderService）====================
@@ -180,35 +191,87 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
 
     # ==================== 消息钩子 ====================
 
-    @filter.on_llm_request()
-    async def on_message_for_profile(self, event: AstrMessageEvent, req):
-        """监听所有消息用于用户画像更新"""
-        if not self._get_profile_enabled():
-            return req
+    def _get_profile_message_chain(self, event: AstrMessageEvent) -> list[Any]:
+        """获取当前消息链。"""
+        message_obj = getattr(event, "message_obj", None)
+        return list(getattr(message_obj, "message", None) or [])
 
-        message_text = ""
-        for comp in event.message_obj.message:
+    def _extract_profile_message_text(self, event: AstrMessageEvent) -> tuple[str, bool]:
+        """从事件中提取适合画像分析的纯文本内容。"""
+        parts: list[str] = []
+        has_plain_text = False
+        message_chain = self._get_profile_message_chain(event)
+
+        for comp in message_chain:
+            if isinstance(comp, Plain) and comp.text:
+                if comp.text.strip():
+                    has_plain_text = True
+                parts.append(comp.text)
+            elif isinstance(comp, At):
+                mention_id = str(getattr(comp, "qq", "") or "").strip()
+                if not mention_id:
+                    continue
+                if mention_id == "all":
+                    parts.append("@全体成员")
+                    continue
+                mention_name = str(getattr(comp, "name", "") or "").strip()
+                parts.append(f"@{mention_name or mention_id}")
+
+        if parts:
+            return "".join(parts).strip(), has_plain_text
+
+        fallback_text = str(event.get_message_str() or "").strip()
+        return fallback_text, bool(fallback_text)
+
+    def _is_profile_command_message(self, event: AstrMessageEvent, fallback_text: str = "") -> bool:
+        """判断消息是否更像命令而不是自然聊天。"""
+        message_chain = self._get_profile_message_chain(event)
+        for comp in message_chain:
+            if isinstance(comp, (At, Reply)):
+                continue
             if isinstance(comp, Plain):
-                message_text += comp.text
+                stripped = comp.text.lstrip()
+                if not stripped:
+                    continue
+                return stripped.startswith(("/", "／"))
+            return False
 
-        if not message_text.strip():
-            return req
+        return fallback_text.lstrip().startswith(("/", "／"))
+
+    def _extract_profile_group_id(self, event: AstrMessageEvent) -> str:
+        """从事件中提取群聊 ID。"""
+        umo = event.unified_msg_origin or ""
+        if ":group:" not in umo:
+            return ""
+
+        parts = umo.split(":")
+        if len(parts) >= 3:
+            return parts[2]
+        return ""
+
+    async def _collect_profile_message(self, event: AstrMessageEvent) -> None:
+        """收集消息用于画像更新。"""
+        if not self._get_profile_enabled():
+            return
 
         sender_id = str(event.get_sender_id() or "")
-        sender_name = event.get_sender_name() or ""
-        group_id = ""
+        self_id = str(event.get_self_id() or "")
+        if not sender_id or (self_id and sender_id == self_id):
+            return
 
-        # 使用属性访问 unified_msg_origin（推荐方式）
-        umo = event.unified_msg_origin or ""
-        if ":group:" in umo:
-            parts = umo.split(":")
-            if len(parts) >= 3:
-                group_id = parts[2]
+        message_text, has_plain_text = self._extract_profile_message_text(event)
+        if not message_text or not has_plain_text:
+            return
+        if self._is_profile_command_message(event, message_text):
+            return
+
+        sender_name = event.get_sender_name() or ""
+        group_id = self._extract_profile_group_id(event)
 
         try:
             await self.profile_service.process_message(
                 user_id=sender_id,
-                content=message_text.strip(),
+                content=message_text,
                 group_id=group_id,
                 nickname=sender_name,
                 event=event,
@@ -216,7 +279,13 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
         except Exception as e:
             logger.debug(f"[lzpersona] 画像消息处理失败: {e}")
 
-        return req
+    @filter.event_message_type(
+        filter.EventMessageType.GROUP_MESSAGE | filter.EventMessageType.PRIVATE_MESSAGE,
+        priority=1000,
+    )
+    async def on_message_for_profile(self, event: AstrMessageEvent):
+        """监听普通消息并更新用户画像缓冲区。"""
+        await self._collect_profile_message(event)
 
     # ==================== 智能入口（作为命令组的子命令）====================
 
@@ -371,13 +440,13 @@ class QuickPersona(Star, PersonaCommands, ProfileCommands):
             yield r
 
     @profile_cmd.command("添加监控", alias={"add", "monitor"})
-    async def profile_add_monitor(self, event: AstrMessageEvent, user_id: str = "", mode: str = "global"):
+    async def profile_add_monitor(self, event: AstrMessageEvent, user_id: str = "", mode: str = ""):
         async for r in ProfileCommands.profile_add_monitor(self, event, user_id, mode):
             yield r
 
     @profile_cmd.command("移除监控", alias={"remove", "rm"})
-    async def profile_remove_monitor(self, event: AstrMessageEvent, user_id: str = ""):
-        async for r in ProfileCommands.profile_remove_monitor(self, event, user_id):
+    async def profile_remove_monitor(self, event: AstrMessageEvent, user_id: str = "", scope: str = ""):
+        async for r in ProfileCommands.profile_remove_monitor(self, event, user_id, scope):
             yield r
 
     @profile_cmd.command("监控列表", alias={"monitors"})

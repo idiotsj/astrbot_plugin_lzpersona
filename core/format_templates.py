@@ -8,6 +8,7 @@
 - YAML: YAML 格式
 """
 
+import json
 from enum import Enum
 
 
@@ -59,6 +60,36 @@ def parse_format(format_str: str) -> PromptFormat:
         "yml": PromptFormat.YAML,
     }
     return format_map.get(format_str.lower().strip(), PromptFormat.NATURAL)
+
+
+def detect_prompt_format(
+    prompt: str,
+    fallback: PromptFormat = PromptFormat.NATURAL,
+) -> PromptFormat:
+    """根据提示词内容猜测当前格式。"""
+    text = (prompt or "").strip()
+    if not text:
+        return fallback
+
+    if "### 🛠 Character Card:" in text or "**1. 基本信息 (Basic Info)**" in text:
+        return PromptFormat.MARKDOWN
+
+    if text.startswith("<?xml") or text.startswith("<character_card"):
+        return PromptFormat.XML
+
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(parsed, dict):
+                return PromptFormat.JSON
+
+    if text.startswith("character_card:") or "\ncharacter_card:" in text:
+        return PromptFormat.YAML
+
+    return fallback
 
 
 def get_format_display_name(fmt: PromptFormat) -> str:
