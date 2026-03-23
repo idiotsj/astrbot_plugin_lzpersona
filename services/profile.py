@@ -128,6 +128,11 @@ class ProfileService:
             self._user_locks[user_id] = asyncio.Lock()
         return self._user_locks[user_id]
 
+    def _cleanup_user_lock(self, user_id: str) -> None:
+        """清理用户锁，避免内存泄漏。"""
+        if user_id in self._user_locks:
+            del self._user_locks[user_id]
+
     async def load(self):
         """从 KV 存储加载数据"""
         # 使用锁防止并发加载
@@ -697,7 +702,10 @@ class ProfileService:
         if user_id in self._buffers:
             del self._buffers[user_id]
             await self.save_buffers()
-        
+
+        # 清理用户锁
+        self._cleanup_user_lock(user_id)
+
         return deleted
 
     async def force_update(self, user_id: str, event: "AstrMessageEvent" = None) -> bool:
